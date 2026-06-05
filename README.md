@@ -173,8 +173,16 @@ CREATE TABLE dbo.employees (
 );
 GO
 ```
+## Step 4: Enable CDC on Database
 
-## 4. Enable CDC on Table
+## SQL Code:
+
+```sql
+EXEC sys.sp_cdc_enable_db;
+GO
+```
+
+## 5. Enable CDC on Table
 
 ### SQL Code:
 ```sql
