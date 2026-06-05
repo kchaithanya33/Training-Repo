@@ -145,30 +145,177 @@ This document explains how to set up SQL Server, create login, database, table, 
 
 ---
 
-## 1. Create SQL Server Login
+## 1. Create Database
 
-What we are doing:
-We are creating a SQL Server login which is used for authentication (username and password access).
-
-SQL Command:
-CREATE LOGIN cdc_user WITH PASSWORD = 'StrongPass@123';
-
-SQL Code:
-```sql
-CREATE LOGIN cdc_user WITH PASSWORD = 'StrongPass@123';
-GO
-```sql 
-
-## 2. Create Database
-
-What we are doing:
-We are creating a new database where all tables and CDC operations will be performed.
-
-SQL Command:
+### SQL Command:
 CREATE DATABASE CDC_Demo_DB;
 
-SQL Code:
+### SQL Code:
 ```sql
 CREATE DATABASE CDC_Demo_DB;
 GO
+```
+## 2. Create SQL Server Login (Username + Password)
 
+### SQL Code:
+```sql
+CREATE LOGIN cdc_user WITH PASSWORD = 'StrongPass@123';
+GO
+```
+
+## 3. Create Table
+
+### SQL Code:
+```sql
+CREATE TABLE dbo.employees (
+    emp_id INT PRIMARY KEY,
+    emp_name VARCHAR(100),
+    department VARCHAR(50),
+    salary INT,
+    created_at DATETIME DEFAULT GETDATE()
+);
+GO
+```
+
+## 4. Enable CDC on Table
+
+### SQL Code:
+```sql
+EXEC sys.sp_cdc_enable_table
+@source_schema = N'dbo',
+@source_name   = N'employees',
+@role_name     = NULL;
+GO
+```
+
+# SQL Server to Kafka (Debezium Source Connector)
+
+---
+
+## Debezium SQL Server Source Connector Configuration (JSON)
+
+### Source Connector (SQL Server → Kafka)
+
+```json
+{
+  "name": "sqlserver-debezium-source",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "sqlserver-db",
+    "database.port": "1433",
+    "database.user": "cdc_user",
+    "database.password": "StrongPass@123",
+
+    "database.names": "CDC_Demo_DB",
+
+    "topic.prefix": "sqlserver",
+
+    "table.include.list": "dbo.employees",
+
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.employees",
+
+    "include.schema.changes": "true",
+
+    "snapshot.mode": "initial",
+
+    "tombstones.on.delete": "true"
+  }
+}
+```
+
+# Kafka to AWS SQS 
+
+---
+
+# Step 1: Create AWS SQS Queue
+
+# Step 2: Create IAM Role for Lambda
+
+We are creating an IAM role that allows Lambda to:
+
+- Read from Kafka (if MSK is used)
+- Send messages to SQS
+- Write logs to CloudWatch
+
+---
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+# Step 3: Create Lambda Function
+
+We are creating an AWS Lambda function that will receive messages from Kafka and forward them to SQS. This function acts as a processing layer between Kafka and SQS.
+
+---
+
+## Lambda Function Code (Print Event)
+
+We are writing a simple Lambda function that prints the incoming Kafka event for debugging and verification.
+
+### Python Code:
+```python
+import json
+
+def lambda_handler(event, context):
+    print("Received event from Kafka:")
+    print(json.dumps(event, indent=2))
+
+    return {
+        "statusCode": 200,
+        "body": "Event printed successfully"
+    }
+```
+
+
+# Kafka to AWS SQS Configuration (JSON)
+
+We are configuring Kafka Connect to send messages from a Kafka topic directly into AWS SQS using a Camel AWS SQS Sink Connector. This allows real-time streaming of Kafka data into SQS without custom code.
+
+---
+
+## Kafka Connect SQS Sink Configuration
+
+### JSON Configuration 
+
+```json
+{
+  "name": "kafka-to-sqs-sink",
+  "config": {
+    "connector.class": "org.apache.camel.kafkaconnector.aws2sqs.CamelAws2sqsSinkConnector",
+    "tasks.max": "1",
+
+    "topics": "sqlserver.CDC_Demo_DB.dbo.employees",
+
+    "camel.sink.endpoint.queueNameOrArn": "kafka-to-sqs-queue",
+
+    "camel.component.aws2-sqs.region": "ap-south-1",
+
+    "camel.component.aws2-sqs.accessKey": "YOUR_AWS_ACCESS_KEY",
+
+    "camel.component.aws2-sqs.secretKey": "YOUR_AWS_SECRET_KEY",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "transforms": "unwrap",
+
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "true",
+    "transforms.unwrap.delete.handling.mode": "rewrite"
+  }
+}
