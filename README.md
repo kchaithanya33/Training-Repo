@@ -1,35 +1,17 @@
 <h1 align="center">SQL Server CDC to Kafka and SQS Pipeline</h1>
 
-![Architecture](image-path.png)
-
 <p align="center">
-  <strong>Short title:</strong> SQL Server CDC → Kafka → SQS
+  SQL Server CDC → Kafka → SQS
 </p>
 
 ## Overview
 
 This project demonstrates a simple pipeline that captures change-data-capture (CDC) events from SQL Server, streams them into Kafka using Debezium, and forwards messages from Kafka to AWS SQS using a Camel-based Kafka Connect sink. It includes a Docker configuration to run Kafka, Zookeeper, Kafka Connect (with Debezium and Camel SQS connector), and Kafdrop for topic inspection.
 
-## Existing Content
 
 <p align="center">
-  <img src="https://github.com/kchaithanya33/Training-Repo/blob/c95ff7e75c8ced555df926286c14c86d0b59fd6a/SQL%20Server%20CDC%20to%20Kafka%20and%20SQS%20workflow.png?raw=true" width="500"/>
+  <img src="https://github.com/kchaithanya33/Training-Repo/blob/c95ff7e75c8ced555df926286c14c86d0b59fd6a/SQL%20Server%20CDC%20to%20Kafka%20and%20SQS%20workflow.png?raw=true" width="300"/>
 </p>
-
-1. Kafka is a message streaming system  
-It stores data temporarily in topics  
-It lets systems send and receive data in real-time  
-To connect Kafka with other systems, we use Kafka Connector Plugins  
-
-2. Inside Kafka Connect plugins, we have:  
-
-a. Source Connectors -> Bring data INTO Kafka  
-Example: Debezium (SQL Server, MySQL, etc.)  
-Flow: Database → Kafka Topic  
-
-b. Sink Connectors: Send data OUT of Kafka  
-Example: AWS SQS connector (Camel)  
-Flow: Kafka Topic → External System  
 
 ## Docker Setup
 
@@ -157,16 +139,7 @@ docker-compose up -d --build
 docker ps
 ```
 
-3. Kafka Connect REST API is available at `http://localhost:8083` for creating connector configs.
 
-4. Kafdrop UI is available at `http://localhost:9000` to inspect topics.
 
-## Notes / Troubleshooting
 
-- If the Connect worker cannot find plugins, ensure the `CONNECT_PLUGIN_PATH` in `docker-compose.yaml` matches where plugins are installed inside the image. The Dockerfile above installs Debezium to the Confluent Hub components path and extracts Camel SQS into `/usr/share/confluent-hub-components`.
-- If you get port conflicts, stop other local Kafka/Zookeeper instances or change exposed ports in `docker-compose.yaml`.
-- For Debezium SQL Server source, ensure SQL Server is configured for CDC and network access from the Connect container. Debezium requires correct JDBC connection settings and permissions.
-- For Camel AWS2 SQS sink, provide AWS credentials and connector configuration (region, queue URL, authentication). Do not store secrets in plaintext; prefer environment variables or a secrets manager.
-
-If you want, I can add example connector JSON configs for Debezium (SQL Server) and the Camel SQS sink next.
 
