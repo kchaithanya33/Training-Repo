@@ -139,7 +139,36 @@ docker-compose up -d --build
 docker ps
 ```
 
+# SQL Server CDC Setup (Step-by-Step)
 
+This document explains how to set up SQL Server, create login, database, table, and enable Change Data Capture (CDC).
 
+---
 
+## 1. Create SQL Server Login
+
+What we are doing:
+We are creating a SQL Server login which is used for authentication (username and password access).
+
+SQL Command:
+CREATE LOGIN cdc_user WITH PASSWORD = 'StrongPass@123';
+
+SQL Code:
+```sql
+CREATE LOGIN cdc_user WITH PASSWORD = 'StrongPass@123';
+GO
+```sql 
+
+## 2. Create Database
+
+What we are doing:
+We are creating a new database where all tables and CDC operations will be performed.
+
+SQL Command:
+CREATE DATABASE CDC_Demo_DB;
+
+SQL Code:
+```sql
+CREATE DATABASE CDC_Demo_DB;
+GO
 
