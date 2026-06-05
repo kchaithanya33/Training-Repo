@@ -175,7 +175,7 @@ GO
 ```
 ## Step 4: Enable CDC on Database
 
-## SQL Code:
+### SQL Code:
 
 ```sql
 EXEC sys.sp_cdc_enable_db;
@@ -233,11 +233,10 @@ GO
 
 # Kafka to AWS SQS 
 
----
 
-# Step 1: Create AWS SQS Queue
+### Step 1: Create AWS SQS Queue
 
-# Step 2: Create IAM Role for Lambda
+### Step 2: Create IAM Role for Lambda
 
 We are creating an IAM role that allows Lambda to:
 
@@ -261,7 +260,7 @@ We are creating an IAM role that allows Lambda to:
   ]
 }
 ```
-# Step 3: Create Lambda Function
+### Step 3: Create Lambda Function
 
 We are creating an AWS Lambda function that will receive messages from Kafka and forward them to SQS. This function acts as a processing layer between Kafka and SQS.
 
