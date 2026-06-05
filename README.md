@@ -147,9 +147,6 @@ This document explains how to set up SQL Server, create login, database, table, 
 
 ## 1. Create Database
 
-### SQL Command:
-CREATE DATABASE CDC_Demo_DB;
-
 ### SQL Code:
 ```sql
 CREATE DATABASE CDC_Demo_DB;
