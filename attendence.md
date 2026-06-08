@@ -398,4 +398,8 @@ Provides a college-wide attendance summary for a selected day.
 ## Highlights
 
 - Highest Attendance Class/Section  
-- Lowest Attendance Class/Section  
+- Lowest Attendance Class/Section
+  
+## Workflow Diagram
+
+![Overall College Dashboard](overall-college.png)
