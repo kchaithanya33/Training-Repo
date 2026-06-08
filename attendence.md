@@ -110,7 +110,7 @@ For each subject (or selected subject):
 - **Overall Attendance Percentage:** 91.67%
 
 ## Workflow Diagram
-![Student Subject Report](student-subject.png)
+<img src="student-subject.png" alt="Student Subject Report" width="200" />
 
 
 # Class-Wise Subject Attendance Query Report
@@ -245,7 +245,8 @@ The system displays attendance information for all students matching the selecte
 | 103 | Priya Kumar | 20 | 19 | 1 | 95% |
 
 ## Workflow Diagram
-![Student Specification](student-spec.png)
+
+<img src="student-spec.png" alt="Student Specification Workflow" width="200" />
 
 
 # Subject Performance Dashboard
@@ -357,4 +358,4 @@ The system displays attendance performance statistics based on the selected filt
 
 ## Workflow Diagram
 
-
+<img src="subject-compare-2026-06-08-045200.png" alt="Subject Comparison Dashboard" width="300" />
