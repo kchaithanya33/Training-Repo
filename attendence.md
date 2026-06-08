@@ -109,3 +109,138 @@ For each subject (or selected subject):
 - **Total Classes Absent:** 10
 - **Overall Attendance Percentage:** 91.67%
 
+## Workflow Diagram
+![Student Subject Report](student-subject.png)
+
+
+# Class-Wise Subject Attendance Query Report
+
+## Overview
+
+This report allows teachers and administrators to view attendance statistics for all students in a selected class, section, and subject.
+
+The report can be generated for a specific **Day**, **Week**, **Month**, or **Semester**.
+
+---
+
+## Filters
+
+### Report Type
+
+- Day
+- Week
+- Month
+- Semester
+
+### Mandatory Filters
+
+- Class
+- Section
+- Subject
+
+### Optional Filters
+
+#### Attendance Percentage Range
+
+- Above 90%
+- Above 75%
+- Below 75%
+- Below 50%
+
+#### Student Name Search
+
+- Search by student name
+
+---
+
+## Steps
+
+### 1. Select Report Type
+
+Choose one of:
+
+- Day
+- Week
+- Month
+- Semester
+
+### 2. Select Class
+
+Example:
+
+- Class 10
+
+### 3. Select Section
+
+Example:
+
+- Section A
+
+### 4. Select Subject
+
+Example:
+
+- Mathematics
+
+### 5. Apply Optional Filters
+
+- Attendance Percentage Range
+- Student Name Search
+
+### 6. Generate Report
+
+The system displays attendance information for all students matching the selected filters.
+
+---
+
+## Output Details
+
+### Report Information
+
+- Report Type
+- Class
+- Section
+- Subject
+
+### Summary Statistics
+
+- Total Students
+- Average Attendance Percentage
+- Highest Attendance Percentage
+- Lowest Attendance Percentage
+
+### Student-wise Attendance
+
+| Student ID | Student Name | Classes Conducted | Classes Attended | Classes Absent | Attendance % |
+|------------|-------------|-------------------|------------------|----------------|--------------|
+| 101 | Alice Johnson | 20 | 18 | 2 | 90% |
+| 102 | Mark Smith | 20 | 16 | 4 | 80% |
+| 103 | Priya Kumar | 20 | 19 | 1 | 95% |
+
+---
+
+## Example Report
+
+### Filters
+
+- **Report Type:** Month
+- **Class:** 10
+- **Section:** A
+- **Subject:** Mathematics
+- **Attendance Percentage Range:** Above 75%
+
+### Summary
+
+- **Total Students:** 30
+- **Average Attendance Percentage:** 86.5%
+- **Highest Attendance Percentage:** 98%
+- **Lowest Attendance Percentage:** 62%
+
+### Student-wise Attendance
+
+| Student ID | Student Name | Classes Conducted | Classes Attended | Classes Absent | Attendance % |
+|------------|-------------|-------------------|------------------|----------------|--------------|
+| 101 | Alice Johnson | 20 | 18 | 2 | 90% |
+| 102 | Mark Smith | 20 | 16 | 4 | 80% |
+| 103 | Priya Kumar | 20 | 19 | 1 | 95% |
+
