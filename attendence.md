@@ -247,3 +247,114 @@ The system displays attendance information for all students matching the selecte
 ## Workflow Diagram
 ![Student Specification](student-spec.png)
 
+
+# Subject Performance Dashboard
+
+## Overview
+
+This report shows attendance performance for a selected subject across all sections of a class.
+
+It helps HODs, coordinators, and administrators compare attendance trends between sections of the same class.
+
+---
+
+## Filters
+
+### Mandatory
+
+- **Report Type**
+  - Day
+  - Week
+  - Month
+  - Semester
+
+- **Subject**
+
+- **Class**
+
+### Optional
+
+- **Section**
+
+---
+
+## Steps
+
+### 1. Select Report Type
+
+Choose one of:
+
+- Day
+- Week
+- Month
+- Semester
+
+### 2. Select Subject
+
+Example:
+
+- Mathematics
+
+### 3. Select Class
+
+Example:
+
+- Class 10
+
+### 4. Optionally Select a Section
+
+Example:
+
+- Section A
+
+### 5. Generate Report
+
+The system displays attendance performance statistics based on the selected filters.
+
+---
+
+## Output Details
+
+### Summary Statistics
+
+- Average Attendance Percentage
+- Highest Attendance Section
+- Lowest Attendance Section
+
+### Section-wise Performance
+
+| Section | Attendance % |
+|----------|-------------|
+| A | 91% |
+| B | 85% |
+| C | 88% |
+
+---
+
+## Example Report
+
+### Filters
+
+- **Report Type:** Month
+- **Subject:** Mathematics
+- **Class:** 10
+
+### Summary
+
+- **Average Attendance:** 88%
+- **Highest Attendance Section:** A (91%)
+- **Lowest Attendance Section:** B (85%)
+
+### Section-wise Breakdown
+
+| Section | Attendance % |
+|----------|-------------|
+| A | 91% |
+| B | 85% |
+| C | 88% |
+
+---
+
+## Workflow Diagram
+
+
