@@ -359,3 +359,43 @@ The system displays attendance performance statistics based on the selected filt
 ## Workflow Diagram
 
 <img src="subject-compare-2026-06-08-045200.png" alt="Subject Comparison Dashboard" width="300" />
+
+
+# Daily Attendance Summary Dashboard
+
+## Overview
+Provides a college-wide attendance summary for a selected day.
+
+---
+
+## Filters
+
+- Date
+
+---
+
+## Output
+
+## Summary
+
+- Total Students
+- Present Students
+- Absent Students
+- Overall Attendance Percentage
+
+---
+
+## Class/Section-wise Attendance
+
+| Class     | Section | Attendance % |
+|----------|--------|--------------|
+| 1st Year | A      | 92%          |
+| 1st Year | B      | 88%          |
+| 2nd Year | A      | 90%          |
+
+---
+
+## Highlights
+
+- Highest Attendance Class/Section  
+- Lowest Attendance Class/Section  
