@@ -244,3 +244,6 @@ The system displays attendance information for all students matching the selecte
 | 102 | Mark Smith | 20 | 16 | 4 | 80% |
 | 103 | Priya Kumar | 20 | 19 | 1 | 95% |
 
+## Workflow Diagram
+![Student Specification](student-spec.png)
+
