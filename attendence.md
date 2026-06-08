@@ -372,8 +372,6 @@ Provides a college-wide attendance summary for a selected day.
 
 - Date
 
----
-
 ## Output
 
 ## Summary
