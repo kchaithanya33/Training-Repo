@@ -1,3 +1,21 @@
+# Logs
+
+A log is a record of what happened in your application while it was running.
+
+## Why do we use logs?
+
+### 1. Debugging Issues
+Logs help developers identify and fix problems by recording errors, exceptions, and application behavior during execution.
+
+### 2. Monitoring Application Health
+Logs provide insights into the application's status, such as request counts, failures, and system performance, helping ensure smooth operation.
+
+### 3. Audit and Security
+Logs maintain a record of user actions and system events, which is useful for security investigations, compliance, and tracking changes.
+
+### 4. Performance Analysis
+Logs help measure execution times, detect bottlenecks, and analyze resource usage to optimize application performance.
+
 # log_audit_event() - Deep Dive with Internal Function Calls
 
 ## Main Function
