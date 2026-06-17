@@ -61,7 +61,96 @@ vector_success = vector_db.delete_biometric(gallery_id, bio_type)
 **Purpose**: Deletes embedding from the vector database (search system).
 
 - **Failure** → Return `{"error": "Vector deletion failed; metadata retained"}` (stops here)
+#### 3.2.1 Inside `delete_biometric(gallery_id, bio_type)`
 
+**Purpose**: Deletes biometric vectors/embeddings from Milvus.
+
+##### Step 1: Determine Collection
+
+```python
+collection_name = self._get_collection_name(
+    bio_type,
+    gallery_id=gallery_id
+)
+```
+
+* Determines which Milvus collection contains the vectors.
+* Returns False if the biometric type is invalid.
+
+##### Step 2: Build Collection List
+
+```python
+collections_to_try = [collection_name]
+```
+
+For FID, legacy collections may also be added:
+
+```python
+custom_vc = self._metadata_vector_collection(gallery_id)
+```
+
+This supports backward compatibility.
+
+##### Step 3: Iterate Through Collections
+
+```python
+for coll in collections_to_try:
+```
+
+For each collection:
+
+**Check Collection Exists**
+
+```python
+if not self._has_collection(coll):
+    continue
+```
+
+**Check Gallery Exists**
+
+```python
+if not self._gallery_exists_in_collection(
+    gallery_id,
+    coll
+):
+    continue
+```
+
+##### Step 4: Delete Vectors
+
+```python
+deletion_result = self.client.delete_vectors(
+    collection_name=coll,
+    expr=f'gallery_id == "{gallery_id}"'
+)
+```
+
+**Purpose**: Removes embeddings from Milvus.  
+**Equivalent query**:
+
+```sql
+
+DELETE FROM collection
+WHERE gallery_id = '12345';
+```
+
+##### Step 5: Return Result
+
+* Returns `True` if:
+  * Vector was deleted successfully, or
+  * No vector existed for that gallery ID.
+* Returns `False` only if an exception occurs.
+
+```python
+return True
+```
+
+**Exception**:
+
+```python
+except Exception:
+    return False
+```
 #### 3.3 Storage Deletion
 ```python
 storage_deleted = storage.delete_file(gallery_id)
