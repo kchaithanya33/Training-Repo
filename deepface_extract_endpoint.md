@@ -1,4 +1,4 @@
-# 📄 4. `deepface_extract_endpoint.md`
+# `deepface_extract_endpoint.md`
 
 # Face Extract Base64 Endpoint Flow
 
