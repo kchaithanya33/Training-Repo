@@ -3949,3 +3949,273 @@ Return Response
 ```
 
 </details>
+
+ <details>
+<summary><b>API: GET /sessions/suggested-names</b></summary>
+
+### Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns recently used session names for a specific
+class-section.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+### Request Example
+
+```http
+GET /sessions/suggested-names?class_section=10-A&limit=12
+```
+
+---
+
+### Step 1: Parse Class Section
+
+```python
+sc, sec = parse_class_section(class_section)
+```
+
+<details>
+<summary><strong>Function: parse_class_section()</strong></summary>
+
+```python
+def parse_class_section(class_section: str):
+```
+
+Input:
+
+```text
+10-A
+```
+
+Output:
+
+```python
+("10", "A")
+```
+
+Input:
+
+```text
+10
+```
+
+Output:
+
+```python
+("10", "")
+```
+
+</details>
+
+---
+
+### Step 2: Validate Class
+
+```python
+if not sc:
+    return AttendanceSessionNamesResponse(names=[])
+```
+
+Example Response:
+
+```json
+{
+  "names": []
+}
+```
+
+---
+
+### Step 3: Query Recent Session Names
+
+```python
+rows = (
+    db.query(AttendanceSession.name)
+    .filter(
+        AttendanceSession.student_class == sc,
+        AttendanceSession.section == (sec or ""),
+    )
+    .order_by(AttendanceSession.started_at.desc())
+    .limit(limit * 3)
+    .all()
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT name
+FROM attendance_session
+WHERE student_class='10'
+AND section='A'
+ORDER BY started_at DESC
+LIMIT 36;
+```
+
+Example Result:
+
+```python
+[
+    ("Math Test",),
+    ("Math Test",),
+    ("Morning Attendance",),
+    ("Science Quiz",)
+]
+```
+
+---
+
+### Step 4: Initialize Collections
+
+```python
+seen = set()
+out = []
+```
+
+Purpose:
+
+```text
+seen -> Track duplicates
+out  -> Final response list
+```
+
+---
+
+### Step 5: Process Names
+
+```python
+for (n,) in rows:
+```
+
+#### First Occurrence
+
+```python
+if n and n not in seen:
+```
+
+```python
+seen.add(n)
+out.append(n)
+```
+
+Example:
+
+```python
+seen = {"Math Test"}
+out = ["Math Test"]
+```
+
+#### Duplicate Occurrence
+
+```python
+Skip
+```
+
+Example:
+
+```python
+"Math Test"
+```
+
+Already exists in:
+
+```python
+seen
+```
+
+So it is ignored.
+
+---
+
+### Step 6: Apply Limit
+
+```python
+if len(out) >= limit:
+    break
+```
+
+Example:
+
+```python
+limit = 12
+```
+
+Once:
+
+```python
+len(out) == 12
+```
+
+Stop processing.
+
+---
+
+### Step 7: Return Response
+
+```python
+return AttendanceSessionNamesResponse(
+    names=out
+)
+```
+
+Example Response:
+
+```json
+{
+  "names": [
+    "Math Test",
+    "Morning Attendance",
+    "Science Quiz",
+    "Weekly Assessment"
+  ]
+}
+```
+
+---
+
+```text
+GET /sessions/suggested-names
+            │
+            ▼
+Receive class_section
+            │
+            ▼
+parse_class_section()
+            │
+            ▼
+Class Valid?
+      │
+ ┌────┴────┐
+ │         │
+NO        YES
+ │         │
+ ▼         ▼
+Return [] Query Sessions
+               │
+               ▼
+ Filter By Class & Section
+               │
+               ▼
+ Order By Latest First
+               │
+               ▼
+ Remove Duplicates
+               │
+               ▼
+ Apply Limit
+               │
+               ▼
+ Return Names
+```
+
+</details>
