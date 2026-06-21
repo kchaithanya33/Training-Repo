@@ -1128,15 +1128,535 @@ Build ZIP
 Return ZIP Download
 ```
 </details>
+</details>
+
+<details>
+<summary><b>API: POST /import/students</b></summary>
 
 
-### Relationship With Import API
+## Operation Type
 
 ```text
-EXPORT API
+CRUD Operation: CREATE / UPDATE
+HTTP Method: POST
 
-Database
-   │
-   ▼
+Purpose:
+Import students and photos from a ZIP file,
+restore them into the system,
+and queue them for re-enrollment.
+```
+
+### Authentication
+
+```python
+_user = RequireAdmin
+```
+
+Only Admin users can access this API.
+
+---
+
+### Request
+
+```text
+multipart/form-data
+```
+
+Fields:
+
+```text
+file        -> students-export.zip
+overwrite   -> true | false
+```
+
+Example:
+
+```text
+file = students-export.zip
+overwrite = true
+```
+
+---
+
+<details>
+<summary><strong>Complete API Execution Flow</strong></summary>
+
+## Step 1: Read Uploaded ZIP
+
+```python
+raw = await file.read()
+```
+
+Reads uploaded ZIP file into memory.
+
+---
+
+## Step 2: Initialize Services
+
+```python
+storage_svc = get_storage_service()
+vector_svc = get_vector_db_service()
+```
+
+Purpose:
+
+```text
+storage_svc -> MinIO/S3 operations
+vector_svc  -> Milvus operations
+```
+
+---
+
+## Step 3: Open ZIP
+
+```python
+with zipfile.ZipFile(
+    io.BytesIO(raw),
+    "r"
+) as zf:
+```
+
+Example:
+
+```text
 students-export.zip
 
+├── students.json
+├── manifest.json
+└── photos/
+```
+
+---
+
+## Step 4: Validate students.json
+
+```python
+if "students.json" not in zf.namelist():
+```
+
+Error:
+
+```json
+{
+  "detail": "students.json missing in import file"
+}
+```
+
+---
+
+## Step 5: Read Student Records
+
+```python
+records = json.loads(
+    zf.read("students.json")
+      .decode("utf-8")
+)
+```
+
+Example:
+
+```json
+[
+  {
+    "student_id": "S101",
+    "name": "John"
+  }
+]
+```
+
+---
+
+## Step 6: Process Each Student
+
+```python
+for rec in records:
+```
+
+Extract:
+
+```python
+sid = str(
+    rec.get("student_id", "")
+).strip()
+```
+
+Find existing student:
+
+```python
+existing = (
+    db.query(Student)
+    .filter(
+        Student.student_id == sid
+    )
+    .first()
+)
+```
+
+---
+
+<details>
+<summary><strong>Student Existence Decision Tree</strong></summary>
+
+# Condition 1
+
+## Student Exists AND overwrite=False
+
+```python
+if existing and not overwrite:
+    skipped += 1
+    continue
+```
+
+### Effect
+
+```text
+Student skipped
+No update
+No photo upload
+No MinIO changes
+No Milvus changes
+```
+
+---
+
+# Condition 2
+
+## Student Exists AND overwrite=True
+
+```python
+if existing and overwrite:
+```
+
+### Delete Old Milvus Embedding
+
+```python
+vector_svc.delete_embedding(
+    existing.class_section,
+    sid
+)
+```
+
+### Delete Old MinIO Photos
+
+```python
+storage_svc.delete_image(...)
+```
+
+### Delete Old StudentFaceImage Rows
+
+```python
+db.query(StudentFaceImage)
+.filter(...)
+.delete()
+```
+
+### Update Existing Student
+
+```python
+student = existing
+
+student.name = name
+student.student_class = student_class
+student.section = section
+```
+
+### Effect
+
+```text
+Student row retained
+Old photos removed
+Old embeddings removed
+Old StudentFaceImage rows removed
+New photos imported
+New StudentFaceImage rows created
+```
+
+---
+
+# Condition 3
+
+## Student Does Not Exist
+
+```python
+else:
+```
+
+### Create Student
+
+```python
+student = Student(
+    student_id=sid,
+    name=name,
+    student_class=student_class,
+    section=section,
+    minio_bucket=storage_svc.bucket,
+    minio_object_key=None,
+)
+```
+
+### Save
+
+```python
+db.add(student)
+```
+
+### Effect
+
+```text
+New Student row created
+Photos uploaded
+StudentFaceImage rows created
+```
+
+---
+
+## Decision Flow
+
+```text
+Student Exists?
+        │
+   ┌────┴────┐
+   │         │
+  YES       NO
+   │         │
+   ▼         ▼
+Overwrite? Create Student
+   │
+ ┌─┴─────┐
+ │       │
+YES      NO
+ │       │
+ ▼       ▼
+Replace Skip
+```
+
+</details>
+
+---
+
+## Step 7: Ensure Primary Assignment
+
+```python
+_ensure_primary_assignment(
+    db,
+    sid,
+    student_class,
+    section
+)
+```
+
+Ensures student-class mapping exists.
+
+---
+
+## Step 8: Import Photos
+
+```python
+for p in photos:
+```
+
+Read image:
+
+```python
+data = zf.read(src)
+```
+
+Build path:
+
+```python
+object_key =
+f"{class_section}/{sid}/faces/{angle}.jpg"
+```
+
+Example:
+
+```text
+10-A/S101/faces/0.jpg
+```
+
+Upload image:
+
+```python
+storage_svc.upload_image(
+    object_key,
+    data,
+    content_type="image/jpeg"
+)
+```
+
+Create metadata:
+
+```python
+db.add(
+    StudentFaceImage(...)
+)
+```
+
+---
+
+## Step 9: Set Primary Photo
+
+```python
+student.minio_object_key =
+primary_object_key
+```
+
+Example:
+
+```text
+10-A/S101/faces/0.jpg
+```
+
+---
+
+## Step 10: Track Imported Student
+
+```python
+imported_ids.append(sid)
+```
+
+Example:
+
+```python
+["S101", "S102"]
+```
+
+---
+
+## Step 11: Save Database Changes
+
+```python
+db.commit()
+```
+
+Stores:
+
+```text
+Student rows
+StudentFaceImage rows
+Updates
+```
+
+---
+
+## Step 12: Load Imported Students
+
+```python
+students = (
+    db.query(Student)
+    .filter(
+        Student.student_id.in_(
+            imported_ids
+        )
+    )
+    .all()
+)
+```
+
+---
+
+## Step 13: Queue Re-enrollment
+
+```python
+reenroll_result =
+_queue_reenroll_students(
+    db,
+    students
+)
+```
+
+Purpose:
+
+```text
+Generate face embeddings
+Store vectors in Milvus
+```
+
+---
+
+## Step 14: Build Import Message
+
+Skipped students:
+
+```python
+if skipped > 0:
+```
+
+Example:
+
+```text
+5 students skipped
+```
+
+---
+
+## Step 15: Return Response
+
+```python
+return StudentImportResponse(...)
+```
+
+Example:
+
+```json
+{
+  "total_students": 100,
+  "imported_students": 95,
+  "skipped_students": 5,
+  "reenroll": {...},
+  "message": "5 row(s) skipped"
+}
+```
+
+</details>
+
+---
+
+## Complete System Flow
+
+```text
+Upload ZIP
+      │
+      ▼
+Read students.json
+      │
+      ▼
+For Each Student
+      │
+      ├── Exists + overwrite=False
+      │         │
+      │         ▼
+      │       Skip
+      │
+      ├── Exists + overwrite=True
+      │         │
+      │         ▼
+      │       Replace Existing Data
+      │
+      └── New Student
+                │
+                ▼
+            Create Student
+      │
+      ▼
+Upload Photos To MinIO
+      │
+      ▼
+Create StudentFaceImage Rows
+      │
+      ▼
+Commit PostgreSQL
+      │
+      ▼
+Queue Re-enrollment
+      │
+      ▼
+Generate Face Embeddings
+      │
+      ▼
+Store Embeddings In Milvus
+      │
+      ▼
+Return Import Summary
+```
+</details>
