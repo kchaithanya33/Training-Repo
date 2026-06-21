@@ -3578,8 +3578,6 @@ Return Response
 <details>
 <summary><strong>API: GET /sessions</strong></summary>
 
-# API: GET /sessions
-
 ## Operation Type
 
 ```text
@@ -4220,8 +4218,6 @@ Return [] Query Sessions
 
 </details>
 
-# API: GET /sessions/{session_id}
-
 <details>
 <summary><strong>GET /sessions/{session_id}</strong></summary>
 
@@ -4449,6 +4445,239 @@ Convert DB Object
                │
                ▼
 Return Response
+```
+
+</details>
+
+<details>
+<summary><strong>API: GET /sessions/{session_id}/unknowns</strong></summary>
+
+### Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns all pending unknown faces detected
+for a specific attendance session.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operators can access this API.
+
+### Route
+
+```http
+GET /sessions/{session_id}/unknowns
+```
+
+### Step 1: Get Session
+
+```python
+sess = _get_session_or_404(
+    db,
+    session_id
+)
+```
+
+<details>
+<summary><strong>Function: _get_session_or_404()</strong></summary>
+
+### Query Session Table
+
+```python
+s = (
+    db.query(AttendanceSession)
+    .filter(
+        AttendanceSession.id == session_id
+    )
+    .first()
+)
+```
+
+### Session Found?
+
+#### YES
+
+```python
+return s
+```
+
+#### NO
+
+```python
+raise HTTPException(
+    status_code=404,
+    detail="Session not found"
+)
+```
+
+Response:
+
+```json
+{
+  "detail": "Session not found"
+}
+```
+
+</details>
+
+---
+
+### Step 2: Get Pending Unknown Faces
+
+```python
+rows = _list_pending_session_unknowns(
+    db,
+    sess.id
+)
+```
+
+<details>
+<summary><strong>Function: _list_pending_session_unknowns()</strong></summary>
+
+### Query Unknown Faces Table
+
+```python
+return (
+    db.query(AttendanceSessionUnknownFace)
+    .filter(
+        AttendanceSessionUnknownFace.session_id == session_id,
+        AttendanceSessionUnknownFace.status == UNKNOWN_STATUS_PENDING,
+    )
+    .order_by(
+        AttendanceSessionUnknownFace.last_seen_at.desc()
+    )
+    .all()
+)
+```
+
+### Filters
+
+```python
+AttendanceSessionUnknownFace.session_id == session_id
+```
+
+Only records belonging to this session.
+
+---
+
+```python
+AttendanceSessionUnknownFace.status == UNKNOWN_STATUS_PENDING
+```
+
+Only pending unknown faces.
+
+Example:
+
+```text
+PENDING   -> Included
+RESOLVED  -> Excluded
+REJECTED  -> Excluded
+```
+
+### Sorting
+
+```python
+.order_by(
+    AttendanceSessionUnknownFace.last_seen_at.desc()
+)
+```
+
+Newest faces first.
+
+### Return
+
+```python
+[
+    AttendanceSessionUnknownFace(...),
+    AttendanceSessionUnknownFace(...)
+]
+```
+
+</details>
+
+---
+
+### Step 3: Convert Rows To Response Items
+
+```python
+unknowns = [
+    _session_unknown_to_item(row)
+    for row in rows
+]
+```
+
+Convert database objects into API response objects.
+
+---
+
+### Step 4: Return Response
+
+```python
+return SessionUnknownFacesResponse(
+    session_id=sess.id,
+    unknowns=[
+        _session_unknown_to_item(row)
+        for row in rows
+    ],
+)
+```
+
+Example Response:
+
+```json
+{
+  "session_id": "123",
+  "unknowns": [
+    {
+      "id": 1,
+      "status": "PENDING"
+    },
+    {
+      "id": 2,
+      "status": "PENDING"
+    }
+  ]
+}
+```
+
+### Flow
+
+```text
+GET /sessions/{session_id}/unknowns
+                │
+                ▼
+      _get_session_or_404()
+                │
+        Session Exists?
+          │         │
+         YES        NO
+          │         │
+          │      HTTP 404
+          ▼
+_list_pending_session_unknowns()
+          │
+          ▼
+Filter Session ID
+          │
+          ▼
+Filter Status=PENDING
+          │
+          ▼
+Sort By last_seen_at DESC
+          │
+          ▼
+Convert To Response Items
+          │
+          ▼
+Return SessionUnknownFacesResponse
 ```
 
 </details>
