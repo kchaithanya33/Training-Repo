@@ -2089,3 +2089,759 @@ Return Cleanup Summary
 </details>
 
 
+
+<details>
+<summary><b>API: GET /abis-integration/b></summary>
+
+### Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns the current ABIS integration configuration,
+API key status, tenant information,
+collection configuration and warnings.
+```
+
+### Authentication
+
+```python
+_user = RequireAdmin
+```
+
+Only Admin users can access this API.
+
+### Route
+
+```python
+@router.get(
+    "/abis-integration",
+    response_model=AbisIntegrationStatusResponse
+)
+def get_abis_integration(
+    db: Session = Depends(get_db),
+    _user=RequireAdmin
+):
+    return get_abis_integration_status(db)
+```
+
+### Flow
+
+```text
+GET /abis-integration
+        │
+        ▼
+get_abis_integration()
+        │
+        ▼
+get_abis_integration_status(db)
+        │
+        ▼
+_get_settings_row(db)
+        │
+        ▼
+Build Status Response
+        │
+        ▼
+Return JSON
+```
+
+
+
+---
+
+# Function: _get_settings_row(db)
+
+<details>
+<summary><strong>_get_settings_row(db)</strong></summary>
+
+### Purpose
+
+```text
+Ensures the settings table always contains
+one settings row with id = 1.
+```
+
+### Query Settings Table
+
+```python
+row = (
+    db.query(AbisIntegrationSettings)
+    .filter(
+        AbisIntegrationSettings.id == 1
+    )
+    .first()
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM abis_integration_settings
+WHERE id = 1
+LIMIT 1;
+```
+
+---
+
+### Row Found?
+
+#### YES
+
+```python
+return row
+```
+
+Example:
+
+```text
+id = 1 already exists
+```
+
+Return existing row.
+
+---
+
+#### NO
+
+Create Default Row
+
+```python
+row = AbisIntegrationSettings(id=1)
+```
+
+Add Row
+
+```python
+db.add(row)
+```
+
+Commit
+
+```python
+db.commit()
+```
+
+Refresh
+
+```python
+db.refresh(row)
+```
+
+Return
+
+```python
+return row
+```
+
+Equivalent SQL:
+
+```sql
+INSERT INTO abis_integration_settings(id)
+VALUES (1);
+```
+
+### Result
+
+```text
+Guarantees a single settings row always exists.
+```
+
+</details>
+
+---
+
+# Model: AbisIntegrationSettings
+
+<details>
+<summary><strong>AbisIntegrationSettings Table Structure</strong></summary>
+
+### Purpose
+
+```text
+Stores ABIS integration settings.
+
+Single-row table.
+Only one row exists with id=1.
+```
+
+### Table Name
+
+```python
+__tablename__ = "abis_integration_settings"
+```
+
+---
+
+### Columns
+
+#### Primary Key
+
+```python
+id = Column(
+    Integer,
+    primary_key=True,
+    default=1
+)
+```
+
+Example:
+
+```text
+1
+```
+
+---
+
+#### Encrypted API Key
+
+```python
+abis_api_key_encrypted = Column(
+    String(1024),
+    nullable=True
+)
+```
+
+Stores encrypted ABIS API key.
+
+Example:
+
+```text
+encrypted_string_here
+```
+
+---
+
+#### Tenant ID
+
+```python
+abis_tenant_id = Column(
+    String(64),
+    nullable=True
+)
+```
+
+Example:
+
+```text
+tenant_001
+```
+
+---
+
+#### Collection Name
+
+```python
+abis_vector_collection_name = Column(
+    String(128),
+    nullable=True
+)
+```
+
+Example:
+
+```text
+school_faces_collection
+```
+
+---
+
+#### Expiry Time
+
+```python
+abis_key_expires_at = Column(
+    DateTime(timezone=True),
+    nullable=True
+)
+```
+
+Example:
+
+```text
+2026-12-31T00:00:00Z
+```
+
+---
+
+#### Updated Timestamp
+
+```python
+updated_at = Column(
+    DateTime(timezone=True),
+    server_default=func.now(),
+    onupdate=func.now()
+)
+```
+
+Automatically updates whenever row changes.
+
+</details>
+
+---
+
+# Function: get_abis_integration_status(db)
+
+<details>
+<summary><strong>get_abis_integration_status(db)</strong></summary>
+
+### Purpose
+
+```text
+Builds the ABIS integration status response.
+```
+
+---
+
+### Step 1
+
+Get Settings Row
+
+```python
+row = _get_settings_row(db)
+```
+
+Possible Result:
+
+```text
+id = 1
+tenant_id = tenant_001
+collection = school_faces
+```
+
+---
+
+### Step 2
+
+Read Environment API Key
+
+```python
+env_key = (
+    ATTENDANCE_ABIS_API_KEY or ""
+).strip()
+```
+
+Examples:
+
+```text
+"abc123" -> "abc123"
+None     -> ""
+```
+
+---
+
+### Step 3
+
+Check DB Key
+
+```python
+db_key_set = bool(
+    row.abis_api_key_encrypted
+)
+```
+
+Examples:
+
+```text
+Encrypted Key Exists -> True
+No Key              -> False
+```
+
+---
+
+### Step 4
+
+Resolve Collection
+
+```python
+env_collection =
+resolve_attendance_abis_vector_collection()
+```
+
+Possible Result:
+
+```text
+school_faces
+```
+
+or
+
+```text
+None
+```
+
+---
+
+### Step 5
+
+Determine Source
+
+```python
+source = (
+    "database"
+    if db_key_set
+    else (
+        "environment"
+        if env_key
+        else "none"
+    )
+)
+```
+
+Possible Results:
+
+```text
+database
+environment
+none
+```
+
+---
+
+### Step 6
+
+Determine API Key Active
+
+```python
+api_key_active =
+db_key_set or bool(env_key)
+```
+
+Examples:
+
+```text
+DB Key Exists      -> True
+ENV Key Exists     -> True
+No Keys            -> False
+```
+
+---
+
+### Step 7
+
+Check Collection Configured
+
+```python
+env_collection_configured =
+bool(env_collection)
+```
+
+Examples:
+
+```text
+Collection Exists -> True
+No Collection     -> False
+```
+
+---
+
+### Step 8
+
+Determine Collection Mode
+
+```python
+effective_collection_mode = (
+    "tenant_bound_via_api_key"
+    if api_key_active
+    else (
+        "env_vector_collection"
+        if env_collection_configured
+        else "legacy_default"
+    )
+)
+```
+
+Possible Results:
+
+#### API Key Active
+
+```text
+tenant_bound_via_api_key
+```
+
+---
+
+#### No API Key but Collection Exists
+
+```text
+env_vector_collection
+```
+
+---
+
+#### Neither Exists
+
+```text
+legacy_default
+```
+
+---
+
+### Step 9
+
+Initialize Warning
+
+```python
+warning = None
+```
+
+---
+
+### Step 10
+
+Both DB Key And ENV Key Exist?
+
+```python
+if db_key_set and env_key:
+```
+
+Warning:
+
+```text
+Both DB-stored key and ATTENDANCE_ABIS_API_KEY
+are configured; database key is active.
+```
+
+---
+
+### Step 11
+
+API Key Active + Collection Exists?
+
+```python
+elif (
+    api_key_active
+    and env_collection_configured
+):
+```
+
+Warning:
+
+```text
+API key mode is active,
+environment collection is ignored.
+```
+
+---
+
+### Step 12
+
+Build Response
+
+```python
+return {
+    ...
+}
+```
+
+Returned Fields:
+
+#### API Key Configured
+
+```python
+"api_key_configured":
+api_key_active
+```
+
+Example:
+
+```text
+true
+```
+
+---
+
+#### API Key Source
+
+```python
+"api_key_source":
+source
+```
+
+Example:
+
+```text
+database
+```
+
+---
+
+#### ENV Key Configured
+
+```python
+"env_api_key_configured":
+bool(env_key)
+```
+
+Example:
+
+```text
+true
+```
+
+---
+
+#### Collection Configured
+
+```python
+"env_collection_configured":
+env_collection_configured
+```
+
+Example:
+
+```text
+true
+```
+
+---
+
+#### Effective Mode
+
+```python
+"effective_collection_mode":
+effective_collection_mode
+```
+
+Example:
+
+```text
+tenant_bound_via_api_key
+```
+
+---
+
+#### Warning
+
+```python
+"warning":
+warning
+```
+
+Example:
+
+```text
+Database key overrides environment key
+```
+
+---
+
+#### Tenant ID
+
+```python
+"tenant_id":
+row.abis_tenant_id
+```
+
+Example:
+
+```text
+tenant_001
+```
+
+---
+
+#### Collection Name
+
+```python
+"vector_collection_name":
+row.abis_vector_collection_name
+or env_collection
+or None
+```
+
+Example:
+
+```text
+school_faces_collection
+```
+
+---
+
+#### Key Expiry
+
+```python
+"key_expires_at":
+row.abis_key_expires_at.isoformat()
+```
+
+Example:
+
+```text
+2026-12-31T00:00:00Z
+```
+
+---
+
+#### Updated Time
+
+```python
+"updated_at":
+row.updated_at.isoformat()
+```
+
+Example:
+
+```text
+2026-06-21T10:30:00Z
+```
+
+</details>
+
+---
+
+# Final Flow
+
+```text
+GET /abis-integration
+        │
+        ▼
+get_abis_integration()
+        │
+        ▼
+get_abis_integration_status()
+        │
+        ▼
+_get_settings_row()
+        │
+        ├── Row Exists
+        │       │
+        │       ▼
+        │   Return Row
+        │
+        └── Row Missing
+                │
+                ▼
+           Create Row(id=1)
+                │
+                ▼
+           Commit
+                │
+                ▼
+           Return Row
+        │
+        ▼
+Check DB API Key
+        │
+        ▼
+Check ENV API Key
+        │
+        ▼
+Check Collection
+        │
+        ▼
+Determine Mode
+        │
+        ▼
+Generate Warning
+        │
+        ▼
+Build Response
+        │
+        ▼
+Return JSON
+```
+</details>
+
