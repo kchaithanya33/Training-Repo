@@ -326,3 +326,241 @@ AdminReenrollResponse
 </details>
 
 </details>
+
+
+<details>
+<summary><b>API: POST /processing-status</b></summary>
+
+# API: GET /processing-status
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns a summary of enrollment processing statuses
+for all students.
+```
+
+<details>
+<summary><b>GET /processing-status</b></summary>
+
+### Authentication
+
+```python
+_user = RequireAdmin
+```
+
+Only Admin users can access this API.
+
+---
+
+### Step 1: Query Status Counts
+
+```python
+status_counts = (
+    db.query(
+        Student.enrollment_status,
+        func.count(Student.id)
+    )
+    .group_by(Student.enrollment_status)
+    .all()
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT
+    enrollment_status,
+    COUNT(id)
+FROM student
+GROUP BY enrollment_status;
+```
+
+Example Result:
+
+```python
+[
+    ("NEW", 20),
+    ("PROCESSING", 5),
+    ("STORED", 100),
+    ("ERROR", 2)
+]
+```
+
+---
+
+### Step 2: Normalize Status Values
+
+```python
+for raw, cnt in status_counts:
+```
+
+<details>
+<summary><b>Expand Status Normalization Logic</b></summary>
+
+#### Handle NULL Values
+
+```python
+key = (raw or "").strip() or ENROLLMENT_STATUS_NEW
+```
+
+Examples:
+
+```text
+None    -> NEW
+""      -> NEW
+"NEW"   -> NEW
+```
+
+#### Convert To Uppercase
+
+```python
+key = key.upper()
+```
+
+Examples:
+
+```text
+new         -> NEW
+stored      -> STORED
+processing  -> PROCESSING
+```
+
+#### Validate Status
+
+Allowed values:
+
+```text
+NEW
+PROCESSING
+STORED
+ERROR
+```
+
+If an unknown status is found:
+
+```python
+key = ERROR
+```
+
+Example:
+
+```text
+"PENDING" -> ERROR
+"ABC"     -> ERROR
+```
+
+#### Store Count
+
+```python
+counts[key] = counts.get(key, 0) + int(cnt)
+```
+
+Example:
+
+```python
+{
+    "NEW": 20,
+    "PROCESSING": 5,
+    "STORED": 100,
+    "ERROR": 2
+}
+```
+
+</details>
+
+---
+
+### Step 3: Count Total Students
+
+```python
+total_all = int(
+    db.query(
+        func.count(Student.id)
+    ).scalar() or 0
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT COUNT(id)
+FROM student;
+```
+
+Example:
+
+```text
+127
+```
+
+---
+
+### Step 4: Build Response
+
+```python
+return {
+    "success": True,
+    "data": {
+        "processing_status": {
+            ...
+        }
+    }
+}
+```
+
+Example Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "processing_status": {
+      "NEW": 20,
+      "PROCESSING": 5,
+      "STORED": 100,
+      "ERROR": 2,
+      "total_records": 127
+    },
+    "timestamp": "2026-06-21T10:30:00Z"
+  }
+}
+```
+
+---
+
+<details>
+<summary><b>Visual Flow</b></summary>
+
+```text
+GET /processing-status
+        │
+        ▼
+Query Student Table
+        │
+        ▼
+GROUP BY enrollment_status
+        │
+        ▼
+NEW         -> Count
+PROCESSING  -> Count
+STORED      -> Count
+ERROR       -> Count
+        │
+        ▼
+Count Total Students
+        │
+        ▼
+Return JSON Response
+```
+
+</details>
+
+---
+
+
+</details>
