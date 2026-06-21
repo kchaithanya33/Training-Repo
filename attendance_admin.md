@@ -2845,3 +2845,203 @@ Return JSON
 ```
 </details>
 
+
+<details>
+<summary><b>API: PUT /abis-integration</b></summary>
+
+### Operation Type
+
+```text
+CRUD Operation: UPDATE
+HTTP Method: PUT
+
+Purpose:
+Update ABIS integration settings.
+```
+
+### Authentication
+
+```python
+_user = RequireAdmin
+```
+
+### Route
+
+```python
+@router.put("/abis-integration")
+def update_abis_integration(...):
+```
+
+### Validation
+
+```python
+if body.api_key is not None and not body.api_key.strip() and not body.clear_api_key:
+```
+
+Return:
+
+```json
+{
+  "detail": "api_key cannot be empty; use clear_api_key=true to remove"
+}
+```
+
+### Function Call
+
+```python
+return save_abis_integration(...)
+```
+
+
+
+---
+
+<details>
+<summary><strong>Function: save_abis_integration()</strong></summary>
+
+### Get Settings Row
+
+```python
+row = _get_settings_row(db)
+```
+
+#### Internal Function Call
+
+<details>
+<summary><strong>Function: _get_settings_row()</strong></summary>
+
+```python
+row = db.query(
+    AbisIntegrationSettings
+).filter(
+    AbisIntegrationSettings.id == 1
+).first()
+```
+
+Row Exists?
+
+```text
+YES → Return Row
+```
+
+Row Missing?
+
+```python
+row = AbisIntegrationSettings(id=1)
+db.add(row)
+db.commit()
+db.refresh(row)
+```
+
+Return:
+
+```python
+return row
+```
+
+</details>
+
+---
+
+### Clear API Key?
+
+```python
+if clear_api_key:
+```
+
+```python
+row.abis_api_key_encrypted = None
+```
+
+---
+
+### New API Key?
+
+```python
+elif api_key is not None and api_key.strip():
+```
+
+```python
+row.abis_api_key_encrypted =
+encrypt_api_key(api_key.strip())
+```
+
+---
+
+### Update Tenant
+
+```python
+if tenant_id is not None:
+```
+
+```python
+row.abis_tenant_id =
+tenant_id.strip() or None
+```
+
+---
+
+### Update Collection
+
+```python
+if vector_collection_name is not None:
+```
+
+```python
+row.abis_vector_collection_name =
+vector_collection_name.strip() or None
+```
+
+---
+
+### Update Expiry
+
+```python
+if key_expires_at is not None:
+```
+
+```python
+row.abis_key_expires_at =
+key_expires_at
+```
+
+---
+
+### Save
+
+```python
+db.commit()
+```
+
+```python
+db.refresh(row)
+```
+
+---
+
+### Return Updated Status
+
+```python
+return get_abis_integration_status(db)
+```
+
+#### Internal Function Call
+
+<details>
+<summary><strong>Function: get_abis_integration_status()</strong></summary>
+
+Builds final response:
+
+```python
+{
+    "api_key_configured": ...,
+    "api_key_source": ...,
+    "tenant_id": ...,
+    "vector_collection_name": ...,
+    "key_expires_at": ...
+}
+```
+</details>
+</details>
+
+</details>
