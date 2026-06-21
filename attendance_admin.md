@@ -3045,3 +3045,531 @@ Builds final response:
 </details>
 
 </details>
+
+<details>
+<summary><strong>API: POST /sessions</strong></summary>
+
+# API: POST /sessions
+
+## Operation Type
+
+```text
+CRUD Operation: CREATE
+HTTP Method: POST
+
+Purpose:
+Creates a new attendance session for a specific
+class and section.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Request Example
+
+```json
+{
+  "name": "Morning Attendance",
+  "session_type": "class",
+  "class_section": "III-F"
+}
+```
+
+---
+
+### Step 1: Read Session Name
+
+```python
+name = (body.name or "").strip()
+```
+
+Remove leading/trailing spaces.
+
+Example:
+
+```text
+" Morning Attendance "
+        ↓
+"Morning Attendance"
+```
+
+### Name Empty?
+
+```python
+if not name:
+```
+
+Return:
+
+```json
+{
+  "detail": "name is required"
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+---
+
+### Step 2: Read Session Type
+
+```python
+st = (body.session_type or "class").strip().lower()
+```
+
+Examples:
+
+```text
+"CLASS"  -> "class"
+"Exam"   -> "exam"
+None     -> "class"
+```
+
+### Validate Session Type
+
+```python
+if st not in SESSION_TYPES:
+```
+
+Example:
+
+```text
+Allowed:
+class
+exam
+event
+```
+
+Invalid:
+
+```text
+meeting
+sports
+```
+
+Return:
+
+```json
+{
+  "detail": "session_type must be one of ..."
+}
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: parse_class_section()</strong></summary>
+
+### Step 3: Parse Class Section
+
+```python
+sc, sec = parse_class_section(body.class_section)
+```
+
+Function:
+
+```python
+def parse_class_section(class_section: str):
+```
+
+#### Input
+
+```text
+III-F
+```
+
+#### Processing
+
+```python
+parts = class_section.split("-", 1)
+```
+
+Result:
+
+```python
+["III", "F"]
+```
+
+#### Return
+
+```python
+("III", "F")
+```
+
+Example:
+
+```text
+III-F → Class=III, Section=F
+III   → Class=III, Section=""
+```
+
+### Class Missing?
+
+```python
+if not sc:
+```
+
+Return:
+
+```json
+{
+  "detail": "class_section must include a class"
+}
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Internal Function: _has_active_session()</strong></summary>
+
+### Step 4: Check Active Session
+
+```python
+_has_active_session(
+    db,
+    sc,
+    sec or ""
+)
+```
+
+Function:
+
+```python
+def _has_active_session(
+    db,
+    student_class,
+    section
+)
+```
+
+### Query
+
+```python
+db.query(AttendanceSession)
+.filter(
+    AttendanceSession.student_class == student_class,
+    AttendanceSession.section == section,
+    AttendanceSession.status == SESSION_ACTIVE,
+)
+.first()
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_session
+WHERE student_class='III'
+AND section='F'
+AND status='ACTIVE'
+LIMIT 1;
+```
+
+### Active Session Found?
+
+#### YES
+
+Return:
+
+```json
+{
+  "detail": "An active session already exists for this class and section. Complete or cancel it first."
+}
+```
+
+HTTP:
+
+```text
+409 Conflict
+```
+
+#### NO
+
+Continue.
+
+</details>
+
+---
+
+<details>
+<summary><strong>Internal Function: _find_duplicate_session_today()</strong></summary>
+
+### Step 5: Check Duplicate Session
+
+```python
+duplicate = _find_duplicate_session_today(
+    db,
+    sc,
+    sec or "",
+    name,
+    st
+)
+```
+
+Function:
+
+```python
+def _find_duplicate_session_today(
+    db,
+    student_class,
+    section,
+    name,
+    session_type
+)
+```
+
+### Get Today's UTC Date
+
+```python
+today = utc_calendar_day(
+    datetime.now(timezone.utc)
+)
+```
+
+Example:
+
+```text
+2026-06-21
+```
+
+### Normalize Name
+
+```python
+norm_name = name.strip().lower()
+```
+
+Example:
+
+```text
+"Morning Attendance"
+        ↓
+"morning attendance"
+```
+
+### Query Matching Sessions
+
+```python
+rows = (
+    db.query(AttendanceSession)
+    .filter(
+        AttendanceSession.student_class == student_class,
+        AttendanceSession.section == section,
+        AttendanceSession.session_type == session_type,
+        func.lower(
+            AttendanceSession.name
+        ) == norm_name,
+    )
+    .all()
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_session
+WHERE student_class='III'
+AND section='F'
+AND session_type='class'
+AND LOWER(name)='morning attendance';
+```
+
+### Check Same Day
+
+```python
+for row in rows:
+```
+
+```python
+if row.started_at
+and utc_calendar_day(
+    row.started_at
+) == today:
+```
+
+#### Duplicate Found
+
+Return Session Object.
+
+#### No Duplicate
+
+```python
+return None
+```
+
+### Duplicate Exists?
+
+#### YES
+
+Return:
+
+```json
+{
+  "detail": "A session named 'Morning Attendance' already exists today..."
+}
+```
+
+HTTP:
+
+```text
+409 Conflict
+```
+
+#### NO
+
+Continue.
+
+</details>
+
+---
+
+### Step 6: Generate Session ID
+
+```python
+sid = str(uuid.uuid4())
+```
+
+Example:
+
+```text
+a3d76e78-7ef9-4c13-8d9f-75fdf2bdf533
+```
+
+---
+
+### Step 7: Create AttendanceSession Object
+
+```python
+row = AttendanceSession(
+    id=sid,
+    name=name,
+    session_type=st,
+    student_class=sc,
+    section=sec or "",
+    status=SESSION_ACTIVE,
+    started_at=datetime.now(timezone.utc),
+    ended_at=None,
+)
+```
+
+Example:
+
+```python
+AttendanceSession(
+    id="123",
+    name="Morning Attendance",
+    session_type="class",
+    student_class="III",
+    section="F",
+    status="ACTIVE"
+)
+```
+
+---
+
+### Step 8: Save To Database
+
+```python
+db.add(row)
+```
+
+Add object to SQLAlchemy session.
+
+```python
+db.commit()
+```
+
+Save row in PostgreSQL.
+
+```python
+db.refresh(row)
+```
+
+Reload saved values from database.
+
+---
+
+### Step 9: Return Response
+
+```python
+return _session_to_response(row)
+```
+
+Example Response:
+
+```json
+{
+  "id": "a3d76e78-7ef9-4c13-8d9f-75fdf2bdf533",
+  "name": "Morning Attendance",
+  "session_type": "class",
+  "student_class": "III",
+  "section": "F",
+  "status": "ACTIVE"
+}
+```
+
+---
+
+### Flow
+
+```text
+POST /sessions
+      │
+      ▼
+Read Name
+      │
+      ▼
+Validate Name
+      │
+      ▼
+Read Session Type
+      │
+      ▼
+Validate Session Type
+      │
+      ▼
+parse_class_section()
+      │
+      ▼
+_has_active_session()
+      │
+      ├── YES → 409 Error
+      │
+      ▼
+_find_duplicate_session_today()
+      │
+      ├── YES → 409 Error
+      │
+      ▼
+Generate UUID
+      │
+      ▼
+Create AttendanceSession
+      │
+      ▼
+db.add()
+      │
+      ▼
+db.commit()
+      │
+      ▼
+db.refresh()
+      │
+      ▼
+Return Response
+```
+
+</details>
