@@ -4219,3 +4219,236 @@ Return [] Query Sessions
 ```
 
 </details>
+
+# API: GET /sessions/{session_id}
+
+<details>
+<summary><strong>GET /sessions/{session_id}</strong></summary>
+
+### Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Fetch a single attendance session using its session_id.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+### Request Example
+
+```http
+GET /sessions/550e8400-e29b-41d4-a716-446655440000
+```
+
+### Path Parameter
+
+```python
+session_id: str
+```
+
+Example:
+
+```text
+550e8400-e29b-41d4-a716-446655440000
+```
+
+---
+
+### Step 1: Call Internal Function
+
+```python
+return _session_to_response(
+    _get_session_or_404(
+        db,
+        session_id
+    )
+)
+```
+
+The API executes two internal functions:
+
+```text
+1. _get_session_or_404()
+2. _session_to_response()
+```
+
+---
+
+<details>
+<summary><strong>Function: _get_session_or_404()</strong></summary>
+
+### Purpose
+
+```text
+Fetch attendance session from database.
+
+If session does not exist,
+return HTTP 404.
+```
+
+Typical Logic:
+
+```python
+session = (
+    db.query(AttendanceSession)
+    .filter(
+        AttendanceSession.id == session_id
+    )
+    .first()
+)
+```
+
+#### Session Found
+
+Example:
+
+```python
+AttendanceSession(
+    id="123",
+    name="Morning Attendance"
+)
+```
+
+Return:
+
+```python
+session
+```
+
+#### Session Not Found
+
+Raise:
+
+```python
+HTTPException(
+    status_code=404,
+    detail="Session not found"
+)
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Function: _session_to_response()</strong></summary>
+
+### Purpose
+
+```text
+Convert AttendanceSession database object
+into AttendanceSessionResponse.
+```
+
+Function:
+
+```python
+def _session_to_response(
+    s: AttendanceSession
+) -> AttendanceSessionResponse:
+```
+
+Return:
+
+```python
+AttendanceSessionResponse(
+    id=s.id,
+    name=s.name,
+    session_type=s.session_type,
+    class_section=s.class_section,
+    student_class=s.student_class,
+    section=s.section,
+    status=s.status,
+    started_at=s.started_at,
+    ended_at=s.ended_at,
+)
+```
+
+---
+
+### Example Input
+
+```python
+AttendanceSession(
+    id="123",
+    name="Morning Attendance",
+    session_type="class",
+    student_class="10",
+    section="A",
+    status="ACTIVE",
+    started_at="2026-06-21T09:00:00Z",
+    ended_at=None
+)
+```
+
+### Example Output
+
+```json
+{
+  "id": "123",
+  "name": "Morning Attendance",
+  "session_type": "class",
+  "class_section": "10-A",
+  "student_class": "10",
+  "section": "A",
+  "status": "ACTIVE",
+  "started_at": "2026-06-21T09:00:00Z",
+  "ended_at": null
+}
+```
+
+</details>
+
+---
+
+### Final Response
+
+```json
+{
+  "id": "123",
+  "name": "Morning Attendance",
+  "session_type": "class",
+  "class_section": "10-A",
+  "student_class": "10",
+  "section": "A",
+  "status": "ACTIVE",
+  "started_at": "2026-06-21T09:00:00Z",
+  "ended_at": null
+}
+```
+
+---
+
+```text
+GET /sessions/{session_id}
+            │
+            ▼
+_get_session_or_404()
+            │
+            ▼
+Session Found?
+      │
+ ┌────┴────┐
+ │         │
+NO        YES
+ │         │
+ ▼         ▼
+404     _session_to_response()
+               │
+               ▼
+Convert DB Object
+               │
+               ▼
+Return Response
+```
+
+</details>
