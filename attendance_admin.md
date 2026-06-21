@@ -4681,3 +4681,296 @@ Return SessionUnknownFacesResponse
 ```
 
 </details>
+
+<details>
+<summary><strong>API: POST /sessions/{session_id}/complete</strong></summary>
+
+### Operation Type
+
+```text
+CRUD Operation: UPDATE
+HTTP Method: POST
+
+Purpose:
+Completes an active attendance session,
+sets its end time, and schedules cleanup
+of session unknown faces.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operators can access this API.
+
+### Route
+
+```http
+POST /sessions/{session_id}/complete
+```
+
+### Step 1: Get Session
+
+```python
+s = _get_session_or_404(
+    db,
+    session_id
+)
+```
+
+<details>
+<summary><strong>Function: _get_session_or_404()</strong></summary>
+
+### Query Session Table
+
+```python
+s = (
+    db.query(AttendanceSession)
+    .filter(
+        AttendanceSession.id == session_id
+    )
+    .first()
+)
+```
+
+### Session Found?
+
+#### YES
+
+```python
+return s
+```
+
+#### NO
+
+```python
+raise HTTPException(
+    status_code=404,
+    detail="Session not found"
+)
+```
+
+</details>
+
+---
+
+### Step 2: Validate Session Status
+
+```python
+if s.status != SESSION_ACTIVE:
+    raise HTTPException(
+        status_code=400,
+        detail="Only an active session can be completed"
+    )
+```
+
+### Valid?
+
+#### YES
+
+Continue.
+
+#### NO
+
+Response:
+
+```json
+{
+  "detail": "Only an active session can be completed"
+}
+```
+
+Example:
+
+```text
+ACTIVE       -> Allowed
+COMPLETED    -> Rejected
+CANCELLED    -> Rejected
+```
+
+---
+
+### Step 3: Mark Session Completed
+
+```python
+s.status = SESSION_COMPLETED
+```
+
+Example:
+
+```text
+Before: ACTIVE
+After : COMPLETED
+```
+
+---
+
+### Step 4: Set End Time
+
+```python
+s.ended_at = datetime.now(
+    timezone.utc
+)
+```
+
+Example:
+
+```text
+2026-06-22 14:30:15 UTC
+```
+
+---
+
+### Step 5: Save Changes
+
+```python
+db.commit()
+```
+
+Persist changes to database.
+
+---
+
+### Step 6: Refresh Session Object
+
+```python
+db.refresh(s)
+```
+
+Reload latest values from database.
+
+---
+
+### Step 7: Schedule Background Cleanup
+
+```python
+background_tasks.add_task(
+    _cleanup_session_unknowns_background,
+    s.id
+)
+```
+
+Schedules cleanup of session unknown faces.
+
+---
+
+```python
+background_tasks.add_task(
+    _cleanup_session_unknowns_retry_background,
+    s.id
+)
+```
+
+Schedules retry cleanup process.
+
+These tasks run after the API response is returned.
+
+---
+
+### Step 8: Convert To Response Object
+
+```python
+return _session_to_response(s)
+```
+
+<details>
+<summary><strong>Function: _session_to_response()</strong></summary>
+
+### Convert Database Model
+
+```python
+AttendanceSessionResponse(
+    id=s.id,
+    name=s.name,
+    session_type=s.session_type,
+    class_section=s.class_section,
+    student_class=s.student_class,
+    section=s.section,
+    status=s.status,
+    started_at=s.started_at,
+    ended_at=s.ended_at,
+)
+```
+
+### Example Response Object
+
+```python
+{
+    "id": "123",
+    "name": "Morning Attendance",
+    "session_type": "class",
+    "class_section": "10-A",
+    "student_class": "10",
+    "section": "A",
+    "status": "COMPLETED",
+    "started_at": "...",
+    "ended_at": "..."
+}
+```
+
+</details>
+
+---
+
+### Final Response
+
+```json
+{
+  "id": "123",
+  "name": "Morning Attendance",
+  "session_type": "class",
+  "class_section": "10-A",
+  "student_class": "10",
+  "section": "A",
+  "status": "COMPLETED",
+  "started_at": "2026-06-22T09:00:00Z",
+  "ended_at": "2026-06-22T10:15:00Z"
+}
+```
+
+### Flow
+
+```text
+POST /sessions/{session_id}/complete
+                    │
+                    ▼
+      _get_session_or_404()
+                    │
+            Session Found?
+              │         │
+             YES        NO
+              │         │
+              │      HTTP 404
+              ▼
+      Status == ACTIVE ?
+              │
+       ┌──────┴──────┐
+       │             │
+      YES            NO
+       │             │
+       │        HTTP 400
+       ▼
+Set Status = COMPLETED
+       │
+       ▼
+Set ended_at
+       │
+       ▼
+db.commit()
+       │
+       ▼
+db.refresh()
+       │
+       ▼
+Schedule Cleanup Tasks
+       │
+       ▼
+_session_to_response()
+       │
+       ▼
+Return AttendanceSessionResponse
+```
+
+</details>
