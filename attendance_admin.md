@@ -3573,3 +3573,379 @@ Return Response
 ```
 
 </details>
+
+
+<details>
+<summary><strong>API: GET /sessions</strong></summary>
+
+# API: GET /sessions
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns attendance sessions with optional
+class-section and status filtering.
+Supports pagination.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Query Parameters
+
+```text
+class_section (optional)
+status        (optional)
+skip          (optional)
+limit         (optional)
+```
+
+Example:
+
+```http
+GET /sessions?class_section=III-F&status=ACTIVE&skip=0&limit=50
+```
+
+---
+
+### Step 1: Create Base Query
+
+```python
+q = db.query(AttendanceSession)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_session;
+```
+
+---
+
+### Class Section Provided?
+
+```python
+if class_section:
+```
+
+<details>
+<summary><strong>Internal Function: parse_class_section()</strong></summary>
+
+### Parse Class Section
+
+```python
+sc, sec = parse_class_section(
+    class_section
+)
+```
+
+Function:
+
+```python
+def parse_class_section(
+    class_section: str
+)
+```
+
+Examples:
+
+```text
+III-F
+```
+
+Returns:
+
+```python
+("III", "F")
+```
+
+Example:
+
+```text
+III
+```
+
+Returns:
+
+```python
+("III", "")
+```
+
+</details>
+
+### Apply Class Filter
+
+```python
+q = q.filter(
+    AttendanceSession.student_class == sc,
+    AttendanceSession.section == (
+        sec or ""
+    )
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_session
+WHERE student_class='III'
+AND section='F';
+```
+
+---
+
+### Status Provided?
+
+```python
+if status:
+```
+
+### Apply Status Filter
+
+```python
+q = q.filter(
+    AttendanceSession.status
+    == status.strip()
+)
+```
+
+Example:
+
+```text
+ACTIVE
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_session
+WHERE status='ACTIVE';
+```
+
+---
+
+### Step 2: Count Total Records
+
+```python
+total = q.count()
+```
+
+Equivalent SQL:
+
+```sql
+SELECT COUNT(*)
+FROM attendance_session;
+```
+
+Example:
+
+```text
+125
+```
+
+This count is calculated before pagination.
+
+---
+
+### Step 3: Apply Sorting
+
+```python
+q.order_by(
+    AttendanceSession.started_at.desc()
+)
+```
+
+Sort sessions by newest first.
+
+Example:
+
+```text
+2026-06-21 10:00
+2026-06-21 09:00
+2026-06-20 15:00
+```
+
+---
+
+### Step 4: Apply Pagination
+
+#### Skip Records
+
+```python
+.offset(skip)
+```
+
+Example:
+
+```python
+skip = 50
+```
+
+Skip first 50 records.
+
+---
+
+#### Limit Records
+
+```python
+.limit(limit)
+```
+
+Example:
+
+```python
+limit = 50
+```
+
+Return maximum 50 records.
+
+---
+
+### Execute Query
+
+```python
+rows = (
+    q.order_by(
+        AttendanceSession.started_at.desc()
+    )
+    .offset(skip)
+    .limit(limit)
+    .all()
+)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_session
+ORDER BY started_at DESC
+LIMIT 50
+OFFSET 0;
+```
+
+---
+
+### Step 5: Convert Database Objects To Response Objects
+
+```python
+[
+    _session_to_response(s)
+    for s in rows
+]
+```
+
+Example:
+
+```python
+AttendanceSession
+```
+
+↓
+
+```json
+{
+  "id": "123",
+  "name": "Morning Attendance",
+  "status": "ACTIVE"
+}
+```
+
+---
+
+### Step 6: Return Response
+
+```python
+return AttendanceSessionListResponse(
+    sessions=[
+        _session_to_response(s)
+        for s in rows
+    ],
+    total=total
+)
+```
+
+Example Response:
+
+```json
+{
+  "sessions": [
+    {
+      "id": "123",
+      "name": "Morning Attendance",
+      "session_type": "class",
+      "student_class": "III",
+      "section": "F",
+      "status": "ACTIVE"
+    }
+  ],
+  "total": 125
+}
+```
+
+---
+
+### Flow
+
+```text
+GET /sessions
+      │
+      ▼
+Create Base Query
+      │
+      ▼
+class_section Provided?
+      │
+      ├── YES
+      │      │
+      │      ▼
+      │ parse_class_section()
+      │      │
+      │      ▼
+      │ Apply Class Filter
+      │
+      ▼
+status Provided?
+      │
+      ├── YES
+      │      │
+      │      ▼
+      │ Apply Status Filter
+      │
+      ▼
+Count Total Records
+      │
+      ▼
+Sort By started_at DESC
+      │
+      ▼
+Apply Offset(skip)
+      │
+      ▼
+Apply Limit(limit)
+      │
+      ▼
+Execute Query
+      │
+      ▼
+Convert To Response Objects
+      │
+      ▼
+Return Response
+```
+
+</details>
