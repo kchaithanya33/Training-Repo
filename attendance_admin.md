@@ -561,6 +561,591 @@ Return JSON Response
 </details>
 
 ---
+</details>
 
+<details>
+<summary><b>API: GET /export/students</b></summary>
+
+### Operation Type
+
+```text
+Export student records and photos from the system
+into a ZIP file for backup, migration, or re-import.
+```
+
+### Authentication
+
+```python
+_user = RequireAdmin
+```
+
+Only Admin users can access this API.
+
+---
+
+### Request Options
+
+#### Export All Students
+
+```http
+GET /export/students
+```
+
+---
+
+#### Export Single Student
+
+```http
+GET /export/students?student_id=S101
+```
+
+---
+
+#### Export Multiple Students
+
+```http
+GET /export/students?student_ids=S101,S102,S103
+```
+
+---
+
+### Get Storage Service
+
+```python
+storage_svc = get_storage_service()
+```
+
+Used for:
+
+```text
+Downloading student photos
+from MinIO / S3 / Local Storage
+```
+
+---
+
+### Parse Student IDs
+
+```python
+ids = [
+    x.strip()
+    for x in (student_ids or "").split(",")
+    if x.strip()
+]
+```
+
+Example:
+
+```python
+student_ids = "S101,S102,S103"
+```
+
+Result:
+
+```python
+[
+    "S101",
+    "S102",
+    "S103"
+]
+```
+
+---
+
+### Fetch Students
+
+#### Multiple IDs Provided
+
+```python
+students = (
+    db.query(Student)
+    .filter(Student.student_id.in_(ids))
+    .order_by(Student.student_id.asc())
+    .all()
+)
+```
+
+---
+
+#### Single ID Provided
+
+```python
+students = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id.strip()
+    )
+    .all()
+)
+```
+
+---
+
+#### No IDs Provided
+
+```python
+students = (
+    db.query(Student)
+    .order_by(Student.student_id.asc())
+    .all()
+)
+```
+
+Fetch all students.
+
+---
+
+### No Students Found?
+
+```python
+if not students:
+```
+
+Return:
+
+```python
+HTTP 404
+```
+
+```json
+{
+  "detail": "No students found to export"
+}
+```
+
+---
+
+### Create ZIP In Memory
+
+```python
+mem = io.BytesIO()
+```
+
+Creates a temporary ZIP file in memory.
+
+---
+
+### Initialize Export Structures
+
+```python
+students_payload = []
+photo_count = 0
+```
+
+---
+
+### Create ZIP Archive
+
+```python
+with zipfile.ZipFile(
+    mem,
+    "w",
+    compression=zipfile.ZIP_DEFLATED
+) as zf:
+```
+
+---
+
+### Process Each Student
+
+```python
+for s in students:
+```
+
+---
+
+### Collect Student Photos
+
+```python
+photos = _collect_student_photos(db, s)
+```
+
+Example Return:
+
+```python
+[
+    (
+        0,
+        True,
+        "10-A/S101/faces/0.jpg"
+    ),
+    (
+        1,
+        False,
+        "10-A/S101/faces/1.jpg"
+    )
+]
+```
+
+---
+
+### Photos Found?
+
+#### NO
+
+```python
+continue
+```
+
+Skip student.
+
+---
+
+#### YES
+
+Continue exporting.
+
+---
+
+### Find Primary Photo
+
+```python
+primary_angle_index = next(
+    (
+        a
+        for a, is_p, _
+        in photos
+        if is_p
+    ),
+    0
+)
+```
+
+Example:
+
+```python
+[
+    (0, False, ...),
+    (1, True, ...)
+]
+```
+
+Result:
+
+```python
+primary_angle_index = 1
+```
+
+---
+
+### Export Each Photo
+
+```python
+for angle_index,
+    is_primary,
+    object_key in photos:
+```
+
+---
+
+### Download Photo
+
+```python
+data = storage_svc.download_image(
+    object_key
+)
+```
+
+Example:
+
+```text
+10-A/S101/faces/0.jpg
+```
+
+---
+
+### Create Export Filename
+
+```python
+export_name = (
+    f"photos/{s.student_id}/"
+    f"angle_{angle_index}.jpg"
+)
+```
+
+Example:
+
+```text
+photos/S101/angle_0.jpg
+```
+
+---
+
+### Add Photo To ZIP
+
+```python
+zf.writestr(
+    export_name,
+    data
+)
+```
+
+ZIP Structure:
+
+```text
+photos/
+└── S101/
+    └── angle_0.jpg
+```
+
+---
+
+### Build Photo Metadata
+
+```python
+record_photos.append(
+    {
+        "angle_index": angle_index,
+        "is_primary": is_primary,
+        "file": export_name
+    }
+)
+```
+
+Example:
+
+```json
+{
+  "angle_index": 0,
+  "is_primary": true,
+  "file": "photos/S101/angle_0.jpg"
+}
+```
+
+---
+
+### Count Exported Photos
+
+```python
+photo_count += 1
+```
+
+---
+
+### Build Student Payload
+
+```python
+students_payload.append(
+    {
+        "student_id": s.student_id,
+        "name": s.name,
+        "student_class": s.student_class,
+        "section": s.section or "",
+        "primary_angle_index":
+            primary_angle_index,
+        "photos": record_photos
+    }
+)
+```
+
+Example:
+
+```json
+{
+  "student_id": "S101",
+  "name": "John",
+  "student_class": "10",
+  "section": "A",
+  "primary_angle_index": 0,
+  "photos": [...]
+}
+```
+
+---
+
+### Create Manifest
+
+```python
+manifest = {
+    "version": "1.0",
+    "student_count":
+        len(students_payload),
+    "photo_count":
+        photo_count,
+}
+```
+
+Example:
+
+```json
+{
+  "version": "1.0",
+  "student_count": 100,
+  "photo_count": 350
+}
+```
+
+---
+
+### Write students.json
+
+```python
+zf.writestr(
+    "students.json",
+    json.dumps(
+        students_payload,
+        indent=2
+    )
+)
+```
+
+---
+
+### Write manifest.json
+
+```python
+zf.writestr(
+    "manifest.json",
+    json.dumps(
+        manifest,
+        indent=2
+    )
+)
+```
+
+---
+
+### ZIP Structure
+
+```text
+students-export.zip
+
+├── students.json
+├── manifest.json
+└── photos
+    ├── S101
+    │   ├── angle_0.jpg
+    │   └── angle_1.jpg
+    │
+    ├── S102
+    │   ├── angle_0.jpg
+    │   └── angle_1.jpg
+    │
+    └── S103
+        └── angle_0.jpg
+```
+
+---
+
+### Reset Memory Pointer
+
+```python
+mem.seek(0)
+```
+
+Move ZIP cursor back to beginning.
+
+---
+
+### Select Output Filename
+
+#### Multiple Students
+
+```python
+filename =
+    "students-export-selected.zip"
+```
+
+---
+
+#### Single Student
+
+```python
+filename =
+    f"students-export-{student_id}.zip"
+```
+
+Example:
+
+```text
+students-export-S101.zip
+```
+
+---
+
+#### All Students
+
+```python
+filename =
+    "students-export.zip"
+```
+
+---
+
+### Return ZIP Download
+
+```python
+return StreamingResponse(
+    mem,
+    media_type="application/zip",
+    headers={
+        "Content-Disposition":
+        f'attachment; filename="{filename}"'
+    },
+)
+```
+
+Response:
+
+```http
+Content-Type: application/zip
+```
+
+Browser downloads:
+
+```text
+students-export.zip
+```
+
+---
+
+### Flow Diagram
+
+```text
+GET /export/students
+        │
+        ▼
+Fetch Students
+        │
+        ▼
+Collect Photos
+        │
+        ▼
+Download Images
+        │
+        ▼
+Create students.json
+        │
+        ▼
+Create manifest.json
+        │
+        ▼
+Build ZIP
+        │
+        ▼
+Return ZIP Download
+```
+
+---
+
+### Relationship With Import API
+
+```text
+EXPORT API
+
+Database
+   │
+   ▼
+students-export.zip
+
+----------------------------
+
+IMPORT API
+
+students-export.zip
+   │
+   ▼
+Database
+```
 
 </details>
