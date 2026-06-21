@@ -1660,3 +1660,432 @@ Store Embeddings In Milvus
 Return Import Summary
 ```
 </details>
+
+<details>
+<summary><b>API: POST /cleanup</b></summary>
+
+
+## Operation Type
+
+```text
+CRUD Operation: DELETE
+HTTP Method: POST
+
+Purpose:
+Remove all data from PostgreSQL,
+Milvus, and MinIO.
+
+This operation permanently deletes
+all student, attendance, vector,
+and image data.
+```
+
+### Authentication
+
+```python
+_user = RequireSuperAdmin
+```
+
+Only Super Admin users can access this API.
+
+### Request
+
+```http
+POST /cleanup?confirm=true
+```
+
+Example:
+
+```text
+/cleanup?confirm=true
+```
+
+---
+
+<details>
+<summary><strong>Complete API Execution Flow</strong></summary>
+
+## Step 1: Validate Confirmation
+
+```python
+if not confirm:
+    raise HTTPException(
+        status_code=400,
+        detail="Set confirm=true to perform cleanup"
+    )
+```
+
+### Example
+
+```text
+confirm=false
+```
+
+Response:
+
+```json
+{
+  "detail": "Set confirm=true to perform cleanup"
+}
+```
+
+---
+
+## Step 2: Initialize Result Object
+
+```python
+result = {
+    "postgres": {},
+    "milvus": {},
+    "minio": {}
+}
+```
+
+Example:
+
+```json
+{
+  "postgres": {},
+  "milvus": {},
+  "minio": {}
+}
+```
+
+---
+
+
+## Delete Attendance Records
+
+```python
+deleted_attendance =
+db.query(
+    AttendanceRecord
+).delete()
+```
+
+Equivalent SQL:
+
+```sql
+DELETE FROM attendance_records;
+```
+
+---
+
+## Delete Attendance Sessions
+
+```python
+deleted_sessions =
+db.query(
+    AttendanceSession
+).delete()
+```
+
+Equivalent SQL:
+
+```sql
+DELETE FROM attendance_sessions;
+```
+
+---
+
+## Delete Student Transfers
+
+```python
+deleted_transfers =
+db.query(
+    StudentTransfer
+).delete()
+```
+
+Equivalent SQL:
+
+```sql
+DELETE FROM student_transfers;
+```
+
+---
+
+## Delete Students
+
+```python
+deleted_students =
+db.query(
+    Student
+).delete()
+```
+
+Equivalent SQL:
+
+```sql
+DELETE FROM students;
+```
+
+---
+
+## Commit Changes
+
+```python
+db.commit()
+```
+
+---
+
+## Result
+
+```python
+result["postgres"] = {
+    "attendance_records":
+        deleted_attendance,
+
+    "attendance_sessions":
+        deleted_sessions,
+
+    "student_transfers":
+        deleted_transfers,
+
+    "students":
+        deleted_students
+}
+```
+
+Example:
+
+```json
+{
+  "attendance_records": 500,
+  "attendance_sessions": 20,
+  "student_transfers": 30,
+  "students": 100
+}
+```
+
+---
+
+## Failure Scenario
+
+```python
+except Exception as e:
+```
+
+Rollback:
+
+```python
+db.rollback()
+```
+
+Response:
+
+```json
+{
+  "detail":
+  "Postgres cleanup failed"
+}
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Milvus Cleanup</strong></summary>
+
+## Drop All Collections
+
+```python
+dropped =
+get_vector_db_service()
+.drop_all_collections()
+```
+
+Example:
+
+```python
+[
+  "10A",
+  "10B",
+  "10C"
+]
+```
+
+---
+
+## Store Result
+
+```python
+result["milvus"] = {
+    "collections_dropped":
+        len(dropped),
+
+    "names":
+        dropped
+}
+```
+
+Example:
+
+```json
+{
+  "collections_dropped": 3,
+  "names": [
+    "10A",
+    "10B",
+    "10C"
+  ]
+}
+```
+
+---
+
+## Failure Scenario
+
+```python
+except Exception as e:
+```
+
+Response:
+
+```json
+{
+  "detail":
+  "Milvus cleanup failed"
+}
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>MinIO Cleanup</strong></summary>
+
+## Delete All Objects
+
+```python
+count =
+get_storage_service()
+.delete_all_objects()
+```
+
+Example:
+
+```text
+250 images deleted
+```
+
+---
+
+## Store Result
+
+```python
+result["minio"] = {
+    "objects_deleted": count
+}
+```
+
+Example:
+
+```json
+{
+  "objects_deleted": 250
+}
+```
+
+---
+
+## Failure Scenario
+
+```python
+except Exception as e:
+```
+
+Response:
+
+```json
+{
+  "detail":
+  "MinIO cleanup failed"
+}
+```
+
+</details>
+
+---
+
+## Step 3: Return Response
+
+```python
+return {
+    "detail":
+        "All data cleaned up",
+
+    "result":
+        result
+}
+```
+
+Example Response:
+
+```json
+{
+  "detail": "All data cleaned up",
+  "result": {
+    "postgres": {
+      "attendance_records": 500,
+      "attendance_sessions": 20,
+      "student_transfers": 30,
+      "students": 100
+    },
+    "milvus": {
+      "collections_dropped": 3,
+      "names": [
+        "10A",
+        "10B",
+        "10C"
+      ]
+    },
+    "minio": {
+      "objects_deleted": 250
+    }
+  }
+}
+```
+
+
+## Complete System Flow
+
+```text
+POST /cleanup?confirm=true
+            │
+            ▼
+Validate confirm
+            │
+            ▼
+Delete Attendance Records
+            │
+            ▼
+Delete Attendance Sessions
+            │
+            ▼
+Delete Student Transfers
+            │
+            ▼
+Delete Students
+            │
+            ▼
+Commit PostgreSQL
+            │
+            ▼
+Drop Milvus Collections
+            │
+            ▼
+Delete MinIO Objects
+            │
+            ▼
+Build Result
+            │
+            ▼
+Return Cleanup Summary
+```
+</details>
+
+
