@@ -557,7 +557,7 @@ Count Total Students
         ▼
 Return JSON Response
 ```
-
+</details>
 </details>
 
 ---
@@ -1098,6 +1098,8 @@ students-export.zip
 ```
 
 ---
+<details>
+<summary><b>view Flow Diagram</b></summary>
 
 ### Flow Diagram
 
@@ -1125,8 +1127,8 @@ Build ZIP
         ▼
 Return ZIP Download
 ```
+</details>
 
----
 
 ### Relationship With Import API
 
@@ -1138,14 +1140,3 @@ Database
    ▼
 students-export.zip
 
-----------------------------
-
-IMPORT API
-
-students-export.zip
-   │
-   ▼
-Database
-```
-
-</details>
