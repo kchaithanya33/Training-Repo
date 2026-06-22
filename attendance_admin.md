@@ -5275,3 +5275,343 @@ Return AttendanceSessionResponse
 ```
 
 </details>
+
+
+<details>
+<summary><b>API: POST /recognize</b></summary>
+
+```text
+1. Operator uploads attendance image
+2. Validate session and class-section
+3. Read image bytes
+4. Call _recognize_and_mark_attendance()
+5. Detect faces
+6. Search matching students in ABIS/Milvus
+7. Mark attendance for recognized students
+8. Store unknown faces if not recognized
+9. Save frame and thumbnails (optional)
+10. Return recognition result
+```
+
+---
+
+## API Route
+
+```python
+@router.post("/recognize", response_model=AttendanceRecognizeResponse)
+```
+
+Creates attendance from a captured image.
+
+---
+
+### Input Parameters
+
+```python
+frame: UploadFile = File(...)
+class_section: str = Form(...)
+session_id: str = Form(...)
+threshold: Optional[float] = Form(None)
+search_mode: Optional[str] = Form(None)
+threshold_mode: Optional[str] = Form(None)
+capture_face_thumbnail: Optional[bool] = Form(None)
+capture_frame_image: Optional[bool] = Form(None)
+```
+
+Example:
+
+```text
+frame = class_photo.jpg
+class_section = III-A
+session_id = 12345
+threshold = 0.8
+search_mode = abis_full_frame
+```
+
+---
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operators can use this API.
+
+---
+
+### Validate Session
+
+<details>
+<summary><strong>_validate_session_scope()</strong></summary>
+
+```python
+sess = _validate_session_scope(
+    db,
+    session_id,
+    class_section
+)
+```
+
+Purpose:
+
+```text
+Checks:
+- Session exists
+- Session belongs to class-section
+- Session is valid
+```
+
+Returns:
+
+```python
+AttendanceSession
+```
+
+</details>
+
+---
+
+### Read Uploaded Image
+
+```python
+image_bytes = frame.file.read()
+```
+
+Example:
+
+```text
+JPEG file
+      ↓
+Raw bytes
+```
+
+Stored in:
+
+```python
+image_bytes
+```
+
+---
+
+### Convert Thumbnail Settings
+
+```python
+capture_face_thumbnail_enabled =
+    _coerce_bool(capture_face_thumbnail, True)
+
+capture_frame_image_enabled =
+    _coerce_bool(capture_frame_image, True)
+```
+
+Examples:
+
+```text
+None  -> True
+True  -> True
+False -> False
+```
+
+---
+
+### Main Recognition Function
+
+<details>
+<summary><strong>_recognize_and_mark_attendance()</strong></summary>
+
+```python
+out = _recognize_and_mark_attendance(
+    db,
+    sess,
+    image_bytes,
+    threshold=threshold,
+    search_mode=search_mode,
+    threshold_mode=threshold_mode,
+    frame_id=None,
+    capture_face_thumbnail_enabled=
+        capture_face_thumbnail_enabled,
+    capture_frame_image_enabled=
+        capture_frame_image_enabled,
+)
+```
+
+Purpose:
+
+```text
+Core attendance recognition engine.
+
+Responsibilities:
+
+1. Detect faces
+2. Search ABIS/Milvus
+3. Match students
+4. Mark attendance
+5. Save thumbnails
+6. Handle unknown faces
+7. Return results
+```
+
+### High Level Internal Flow
+
+```text
+Image
+  ↓
+Face Detection
+  ↓
+Face Search
+  ↓
+Student Match
+  ↓
+Attendance Record
+  ↓
+Save Images
+  ↓
+Return Result
+```
+
+</details>
+
+---
+
+## Build Response
+
+```python
+return AttendanceRecognizeResponse(
+```
+
+Creates final API response.
+
+---
+
+### Recognized Faces
+
+```python
+recognized=[
+    RecognizedFace(**r)
+    for r in out["recognized"]
+]
+```
+
+Example:
+
+```json
+[
+  {
+    "student_id": "S001",
+    "name": "John",
+    "distance": 0.92
+  }
+]
+```
+
+---
+
+### Unknown Faces
+
+```python
+unrecognized_faces=[
+    UnknownFaceBox(**b)
+    for b in out["unrecognized_faces"]
+]
+```
+
+Example:
+
+```json
+[
+  {
+    "unknown_id": "abc-123",
+    "x": 100,
+    "y": 50,
+    "w": 80,
+    "h": 80
+  }
+]
+```
+
+---
+
+### Remaining Response Fields
+
+```python
+class_section=out["class_section"]
+unrecognized_count=out["unrecognized_count"]
+result_id=out.get("result_id")
+frame_photo_url=out.get("frame_photo_url")
+runtime_detector_backend=out.get("runtime_detector_backend")
+runtime_recognition_model=out.get("runtime_recognition_model")
+```
+
+Example:
+
+```json
+{
+  "class_section": "III-A",
+  "unrecognized_count": 1,
+  "result_id": "uuid",
+  "frame_photo_url": "/api/attendance/images/frame.jpg",
+  "runtime_detector_backend": "abis",
+  "runtime_recognition_model": "ABIS"
+}
+```
+
+---
+
+## Final Response Example
+
+```json
+{
+  "class_section": "III-A",
+  "recognized": [
+    {
+      "student_id": "S001",
+      "name": "John",
+      "distance": 0.91
+    }
+  ],
+  "unrecognized_count": 1,
+  "unrecognized_faces": [
+    {
+      "unknown_id": "u123",
+      "x": 120,
+      "y": 60,
+      "w": 80,
+      "h": 80
+    }
+  ],
+  "result_id": "uuid",
+  "frame_photo_url": "/api/attendance/images/frame.jpg",
+  "runtime_detector_backend": "abis",
+  "runtime_recognition_model": "ABIS"
+}
+```
+
+---
+
+## Complete Flow
+
+```text
+POST /recognize
+      ↓
+Validate Session
+      ↓
+Read Uploaded Image
+      ↓
+Convert Settings
+      ↓
+Call _recognize_and_mark_attendance()
+      ↓
+Detect Faces
+      ↓
+Search Matches
+      ↓
+Mark Attendance
+      ↓
+Store Unknown Faces
+      ↓
+Build Response
+      ↓
+Return AttendanceRecognizeResponse
+```
+
+</details>
