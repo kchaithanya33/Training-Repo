@@ -739,3 +739,248 @@ It allows:
 - Paginating results
 - Returning assignment-aware student information
 </details>
+
+<details>
+<summary><b>API :GET /classes </b></summary>
+
+At first glance, it looks like duplication because the Student table already stores:
+
+```text
+student_id
+student_class
+section
+```
+
+So it seems we could get class information directly from the Student table.
+
+However, the StudentAssignment table is designed to support:
+
+- Assignment history
+- Class transfers
+- Multiple assignments per student
+- Subject-specific assignments
+- Active/inactive assignment tracking
+- Future scalability
+
+
+
+# Student Table
+
+The Student table stores the student's primary information.
+
+Example:
+
+```text
+Student
+--------------------------------
+S001 | Rahul | III | A
+S002 | Amit  | III | B
+```
+
+Purpose:
+
+```text
+Who the student is
+```
+
+Contains information such as:
+
+- Student ID
+- Student Name
+- Class
+- Section
+- Enrollment Status
+
+---
+
+# Problem If Only Student Table Exists
+
+Suppose Rahul is transferred.
+
+Before:
+
+```text
+S001 | Rahul | III | A
+```
+
+After:
+
+```text
+S001 | Rahul | IV | B
+```
+
+The previous assignment is lost permanently.
+
+There is no history.
+
+---
+
+# StudentAssignment Table
+
+Instead of overwriting old information, assignments can be stored separately.
+
+Example:
+
+```text
+Student
+-------------------
+S001 | Rahul
+```
+
+```text
+StudentAssignment
+------------------------------------------------
+S001 | III | A | active=False
+S001 | IV  | B | active=True
+```
+
+Now both current and historical assignments are preserved.
+
+---
+
+# Multiple Assignments
+
+A student may belong to more than one assignment.
+
+Example:
+
+```text
+S001 | III | A | Math
+S001 | III | A | Science
+S001 | III | A | English
+```
+
+One student can have multiple assignment records.
+
+A single Student row cannot represent this efficiently.
+
+---
+
+# Clue From The Model
+
+The model contains:
+
+```python
+subject = Column(String(100))
+```
+
+This indicates the table is designed for:
+
+```text
+Student
+    ↓
+Class
+    ↓
+Section
+    ↓
+Subject
+```
+
+and not just basic student storage.
+
+---
+
+# Active Assignments
+
+The table contains:
+
+```python
+active = Column(Boolean, nullable=False, default=True)
+```
+
+This allows the system to track:
+
+```text
+Current Assignment
+vs
+Old Assignment
+```
+
+Example:
+
+```text
+S001 | III | A | active=False
+S001 | IV  | B | active=True
+```
+
+Only active assignments are used by APIs such as:
+
+```http
+GET /classes
+GET /students
+```
+
+---
+
+# Why /classes Uses StudentAssignment
+
+The /classes endpoint queries:
+
+```python
+StudentAssignment.student_class
+StudentAssignment.section
+```
+
+because it wants:
+
+```text
+All active class-section combinations
+```
+
+rather than simply reading values from Student.
+
+---
+
+# Current Implementation
+
+During enrollment:
+
+```python
+StudentAssignment(
+    student_id=new_id,
+    student_class=student_class,
+    section=section,
+    subject="",
+    is_primary=True,
+    active=True,
+)
+```
+
+Currently each student receives only one assignment.
+
+Because of that, StudentAssignment appears redundant right now.
+
+---
+
+# Future Benefits
+
+The design supports future features such as:
+
+- Student transfers
+- Assignment history
+- Subject assignments
+- Multiple class mappings
+- Active/inactive assignment management
+
+without changing the database structure later.
+
+---
+
+# Conceptual Difference
+
+```text
+Student
+    = Who the student is
+```
+
+```text
+StudentAssignment
+    = Where the student belongs
+```
+
+This is a common database design pattern known as:
+
+```text
+Master Table + Assignment/Relationship Table
+```
+</details>
