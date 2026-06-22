@@ -3071,3 +3071,371 @@ Build Tree Hierarchy
 Return Response
 ```
 </details>
+</details>
+</details>
+<details>
+<summary><b>GET /summary</b></summary>Purpose
+ 
+Returns attendance summary for a given date range.
+ 
+Summary is returned in two categories:
+ 
+- By Date
+- By Class/Section
+ 
+---
+ 
+Endpoint
+ 
+GET /summary
+ 
+---
+ 
+Query Parameters
+ 
+Parameter| Required| Description
+start_date| Yes| Start date (YYYY-MM-DD)
+end_date| Yes| End date (YYYY-MM-DD)
+class_section| No| Combined class + section
+student_class| No| Student class
+section| No| Student section
+session_id| No| Attendance session ID
+ 
+---
+ 
+Example Request
+ 
+/summary?start_date=2026-06-01&end_date=2026-06-10&student_class=10&section=A
+ 
+---
+ 
+Step 1: Validate Dates
+ 
+Check if start_date is less than or equal to end_date.
+ 
+if start_date > end_date:
+    raise HTTPException(status_code=400)
+ 
+If invalid, return error.
+ 
+---
+ 
+Step 2: Query Attendance Records by Date Range
+ 
+Create base query with date filter.
+ 
+base = db.query(AttendanceRecord).filter(
+    AttendanceRecord.date >= start_date,
+    AttendanceRecord.date <= end_date,
+)
+ 
+At this stage records are filtered only by:
+ 
+- start_date
+- end_date
+ 
+---
+ 
+Step 3: Apply Session Filter (Optional)
+ 
+If session_id is provided:
+ 
+if session_id:
+    base = base.filter(
+        AttendanceRecord.session_id == session_id.strip()
+    )
+ 
+Example:
+ 
+- Morning session
+- Evening session
+ 
+---
+ 
+Step 4: Apply Class Filters (Optional)
+ 
+Apply:
+ 
+- class_section
+- student_class
+- section
+ 
+base = _apply_class_filters(
+    base,
+    class_section,
+    student_class,
+    section
+)
+ 
+Example:
+ 
+- Class = 10
+- Section = A
+ 
+Now base contains only filtered records.
+ 
+---
+ 
+Step 5: Group Filtered Records by Date
+ 
+At this point base already contains all filtered attendance records.
+ 
+Now group by date:
+ 
+by_date_rows = (
+    base.with_entities(
+        AttendanceRecord.date,
+        func.count(AttendanceRecord.id)
+    )
+    .group_by(AttendanceRecord.date)
+    .order_by(AttendanceRecord.date)
+    .all()
+)
+ 
+Important:
+ 
+- No new filter is added here
+- group_by() works on already filtered base query
+ 
+Example Output:
+ 
+Date| Count
+2026-06-01| 45
+2026-06-02| 42
+ 
+Convert to response:
+ 
+by_date = [
+    AttendanceDayCount(date=r[0], count=r[1])
+    for r in by_date_rows
+]
+ 
+---
+ 
+Step 6: Create Query for Class Summary
+ 
+Separate query is created for class summary.
+ 
+by_class_base = db.query(AttendanceRecord).filter(
+    AttendanceRecord.date >= start_date,
+    AttendanceRecord.date <= end_date,
+)
+ 
+---
+ 
+Step 7: Apply Filters Again
+ 
+Apply same filters again.
+ 
+if session_id:
+    by_class_base = by_class_base.filter(
+        AttendanceRecord.session_id == session_id.strip()
+    )
+ 
+by_class_base = _apply_class_filters(
+    by_class_base,
+    class_section,
+    student_class,
+    section
+)
+ 
+---
+ 
+Step 8: Group by Class and Section
+ 
+Group filtered records by:
+ 
+- student_class
+- section
+ 
+by_class_rows = (
+    by_class_base.with_entities(
+        AttendanceRecord.student_class,
+        AttendanceRecord.section,
+        func.count(AttendanceRecord.id),
+    )
+    .group_by(
+        AttendanceRecord.student_class,
+        AttendanceRecord.section
+    )
+    .order_by(
+        AttendanceRecord.student_class,
+        AttendanceRecord.section
+    )
+    .all()
+)
+ 
+Example Output:
+ 
+Class| Section| Count
+10| A| 200
+10| B| 180
+ 
+Convert to response:
+ 
+by_class = [
+    AttendanceClassCount(
+        student_class=r[0],
+        section=r[1] or "",
+        class_section=_class_section_combined(r[0], r[1] or ""),
+        count=r[2],
+    )
+    for r in by_class_rows
+]
+ 
+---
+ 
+Step 9: Return Final Response
+ 
+Return summary response.
+ 
+return AttendanceSummaryResponse(
+    start_date=start_date,
+    end_date=end_date,
+    by_date=by_date,
+    by_class=by_class,
+)
+ 
+Example Response:
+ 
+{
+  "start_date": "2026-06-01",
+  "end_date": "2026-06-10",
+  "by_date": [...],
+  "by_class": [...]
+}
+ 
+---
+ 
+Final Flow
+ 
+1. Validate dates
+2. Filter attendance records by date
+3. Apply session filter
+4. Apply class filters
+5. Group filtered records by date
+6. Create second query
+7. Apply filters again
+8. Group by class and section
+9. Return response
+ 
+</details>
+ 
+Attendance Image API Documentation
+ 
+<details>
+<summary><b>GET /images/{object_key}</b></summary>Purpose
+ 
+Returns attendance-related images from storage.
+ 
+Used for:
+ 
+- Recognized face image
+- Frame image
+ 
+---
+ 
+Endpoint
+ 
+GET /images/{object_key}
+ 
+---
+ 
+Example Request
+ 
+/images/attendance/student_101_face.jpg
+ 
+---
+ 
+Step 1: Receive Object Key
+ 
+Route receives object_key as path parameter.
+ 
+@router.get("/images/{object_key:path}")
+def get_attendance_image(object_key: str, _user=RequireViewer):
+ 
+Example:
+ 
+attendance/student_101_face.jpg
+ 
+---
+ 
+Step 2: Validate Object Key
+ 
+Check if object key is valid.
+ 
+if not object_key or object_key.startswith("/") or ".." in object_key:
+    raise HTTPException(status_code=404, detail="Image not found")
+ 
+This prevents invalid paths.
+ 
+Examples blocked:
+ 
+- Empty path
+- Absolute path
+- Path traversal
+ 
+Example:
+ 
+../../etc/passwd
+ 
+---
+ 
+Step 3: Get Storage Service
+ 
+Initialize storage service.
+ 
+storage_svc = get_storage_service()
+ 
+Storage may be:
+ 
+- Local storage
+- AWS S3
+- Azure Blob
+ 
+---
+ 
+Step 4: Download Image
+ 
+Try downloading image using object key.
+ 
+try:
+    data = storage_svc.download_image(object_key)
+except Exception:
+    raise HTTPException(status_code=404, detail="Image not found")
+ 
+If image exists:
+ 
+- Returns image bytes
+ 
+If image not found:
+ 
+- Returns 404 error
+ 
+---
+ 
+Step 5: Return Image Response
+ 
+Return image as HTTP response.
+ 
+return Response(content=data, media_type="image/jpeg")
+ 
+Response:
+ 
+- content = image bytes
+- media_type = image/jpeg
+ 
+Frontend can directly render image.
+ 
+---
+ 
+Final Flow
+ 
+1. Receive object_key
+2. Validate object_key
+3. Get storage service
+4. Download image
+5. Return image response
+ 
+</details>
+ 
