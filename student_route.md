@@ -984,3 +984,454 @@ This is a common database design pattern known as:
 Master Table + Assignment/Relationship Table
 ```
 </details>
+<details>
+<summary><b>GET /class-sections - Class & Section Matrix API</b></summary>
+
+## Endpoint
+
+```http
+GET /class-sections
+```
+
+## Purpose
+
+Returns all unique active class and section combinations available in the system.
+
+This API is mainly used by the frontend to populate:
+
+- Class dropdowns
+- Section dropdowns
+- Class-section selection filters
+
+Unlike `/classes`, this API returns class and section as separate fields instead of a combined string.
+
+---
+
+## Authentication
+
+Required Role:
+
+```text
+Viewer
+```
+
+```python
+_user = RequireViewer
+```
+
+---
+
+## Request Parameters
+
+None.
+
+Example:
+
+```http
+GET /class-sections
+```
+
+---
+
+## Response Example
+
+```json
+{
+  "pairs": [
+    {
+      "student_class": "III",
+      "section": "A"
+    },
+    {
+      "student_class": "III",
+      "section": "B"
+    },
+    {
+      "student_class": "IV",
+      "section": "A"
+    }
+  ]
+}
+```
+
+
+
+# Code Explanation
+
+## Route Definition
+
+```python
+@router.get("/class-sections", response_model=ClassSectionMatrixResponse)
+```
+
+Creates the endpoint:
+
+```http
+GET /class-sections
+```
+
+The response must match:
+
+```python
+ClassSectionMatrixResponse
+```
+
+---
+
+## Function Definition
+
+```python
+def list_class_section_pairs(
+    db: Session = Depends(get_db),
+    _user=RequireViewer
+):
+```
+
+### Database Session
+
+```python
+db: Session = Depends(get_db)
+```
+
+Provides a database connection.
+
+---
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Ensures the user has Viewer access.
+
+---
+
+## Function Comment
+
+```python
+"""Distinct class + section pairs for separate dropdowns in the UI."""
+```
+
+Explains the purpose of the API.
+
+The frontend can use this endpoint to build dropdowns like:
+
+```text
+Class
+-----
+III
+IV
+V
+```
+
+```text
+Section
+-------
+A
+B
+C
+```
+
+---
+
+## Query Database
+
+```python
+rows = (
+    db.query(
+        StudentAssignment.student_class,
+        StudentAssignment.section
+    )
+```
+
+Selects only:
+
+```text
+student_class
+section
+```
+
+from the StudentAssignment table.
+
+Example table:
+
+```text
+student_id | class | section
+--------------------------------
+S001       | III   | A
+S002       | III   | A
+S003       | III   | B
+S004       | IV    | A
+```
+
+---
+
+## Filter Active Assignments
+
+```python
+.filter(StudentAssignment.active.is_(True))
+```
+
+Only active assignments are included.
+
+Equivalent SQL:
+
+```sql
+WHERE active = true
+```
+
+---
+
+## Remove Duplicates
+
+```python
+.distinct()
+```
+
+Without DISTINCT:
+
+```text
+III A
+III A
+III B
+IV A
+```
+
+With DISTINCT:
+
+```text
+III A
+III B
+IV A
+```
+
+Only unique combinations remain.
+
+Equivalent SQL:
+
+```sql
+SELECT DISTINCT
+student_class,
+section
+```
+
+---
+
+## Sort Results
+
+```python
+.order_by(
+    StudentAssignment.student_class,
+    StudentAssignment.section
+)
+```
+
+Sorts results by:
+
+1. Class
+2. Section
+
+Result:
+
+```text
+III A
+III B
+IV A
+```
+
+---
+
+## Execute Query
+
+```python
+.all()
+```
+
+Runs the SQL query and returns:
+
+```python
+[
+    ("III", "A"),
+    ("III", "B"),
+    ("IV", "A")
+]
+```
+
+Stored in:
+
+```python
+rows
+```
+
+---
+
+## Build Response
+
+```python
+return ClassSectionMatrixResponse(
+```
+
+Creates the response object.
+
+---
+
+### List Comprehension
+
+```python
+pairs=[
+    ClassSectionPair(
+        student_class=r[0],
+        section=r[1] or ""
+    )
+    for r in rows
+]
+```
+
+Loops through every row.
+
+Example:
+
+```python
+("III", "A")
+```
+
+becomes:
+
+```python
+ClassSectionPair(
+    student_class="III",
+    section="A"
+)
+```
+
+---
+
+### Why Use `or ""`?
+
+```python
+section=r[1] or ""
+```
+
+If section is:
+
+```python
+None
+```
+
+it becomes:
+
+```python
+""
+```
+
+This avoids returning null values to the frontend.
+
+---
+
+## Final Response
+
+```json
+{
+  "pairs": [
+    {
+      "student_class": "III",
+      "section": "A"
+    },
+    {
+      "student_class": "III",
+      "section": "B"
+    },
+    {
+      "student_class": "IV",
+      "section": "A"
+    }
+  ]
+}
+```
+
+---
+
+## SQL Equivalent
+
+```sql
+SELECT DISTINCT
+    student_class,
+    section
+FROM student_assignments
+WHERE active = true
+ORDER BY
+    student_class,
+    section;
+```
+
+---
+
+## Complete Flow
+
+```text
+GET /class-sections
+        |
+        v
+Check Viewer Permission
+        |
+        v
+Query StudentAssignment Table
+        |
+        v
+Filter Active Assignments
+        |
+        v
+Remove Duplicate Class-Section Pairs
+        |
+        v
+Sort Results
+        |
+        v
+Convert Rows To ClassSectionPair Objects
+        |
+        v
+Return Response
+```
+
+---
+
+## Difference Between Similar APIs
+
+### GET /classes
+
+Response:
+
+```json
+{
+  "classes": [
+    "III-A",
+    "III-B",
+    "IV-A"
+  ]
+}
+```
+
+Returns combined strings.
+
+---
+
+### GET /class-sections
+
+Response:
+
+```json
+{
+  "pairs": [
+    {
+      "student_class": "III",
+      "section": "A"
+    }
+  ]
+}
+```
+
+Returns structured class and section fields separately.
+
+This format is more useful for frontend filters and dropdowns.
+</details>
