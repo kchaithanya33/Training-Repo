@@ -5614,4 +5614,341 @@ Build Response
 Return AttendanceRecognizeResponse
 ```
 
-</details>
+
+
+# Complete Attendance Session API
+
+## Endpoint
+`POST /sessions/{session_id}/complete`
+
+## Purpose
+Marks an active attendance session as completed.
+
+Once a session is completed:
+- No more attendance can be marked in that session.
+- Session status changes from `ACTIVE` → `COMPLETED`.
+- End time is recorded.
+- Background cleanup of unknown faces is scheduled.
+- Updated session details are returned.
+
+---
+
+## Main Function
+
+```python
+@router.post("/sessions/{session_id}/complete", response_model=AttendanceSessionResponse)
+def complete_attendance_session(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _user=RequireOperator,
+):
+```
+
+### Parameters
+
+| Parameter | Purpose |
+|------------|----------|
+| session_id | Session to complete |
+| background_tasks | Used to run cleanup jobs after response |
+| db | Database session |
+| _user | Ensures authenticated operator |
+
+---
+
+### Step 1: Load Session
+
+```python
+s = _get_session_or_404(db, session_id)
+```
+
+Fetches the session from database.
+
+Internal Function:
+
+```python
+def _get_session_or_404(db: Session, session_id: str) -> AttendanceSession:
+    s = db.query(AttendanceSession)\
+          .filter(AttendanceSession.id == session_id)\
+          .first()
+
+    if not s:
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found"
+        )
+
+    return s
+```
+
+#### Example
+
+Database:
+
+| id | status |
+|-----|---------|
+| S1 | ACTIVE |
+
+Request:
+
+```http
+POST /sessions/S1/complete
+```
+
+Returns session object.
+
+---
+
+### Step 2: Verify Session Is Active
+
+```python
+if s.status != SESSION_ACTIVE:
+```
+
+Checks current status.
+
+---
+
+```python
+raise HTTPException(
+    status_code=400,
+    detail="Only an active session can be completed"
+)
+```
+
+Prevents completion of:
+
+- Completed sessions
+- Cancelled sessions
+
+#### Example
+
+Current Status:
+
+```text
+COMPLETED
+```
+
+Result:
+
+```json
+{
+  "detail": "Only an active session can be completed"
+}
+```
+
+---
+
+### Step 3: Change Status
+
+```python
+s.status = SESSION_COMPLETED
+```
+
+Updates status.
+
+Before:
+
+```text
+ACTIVE
+```
+
+After:
+
+```text
+COMPLETED
+```
+
+---
+
+### Step 4: Store End Time
+
+```python
+s.ended_at = datetime.now(timezone.utc)
+```
+
+Records when session ended.
+
+Example:
+
+```text
+2026-06-21 11:45:20 UTC
+```
+
+---
+
+### Step 5: Save Changes
+
+```python
+db.commit()
+```
+
+Writes changes permanently to database.
+
+---
+
+### Step 6: Refresh Object
+
+```python
+db.refresh(s)
+```
+
+Reloads latest values from database.
+
+Now `s` contains updated status and end time.
+
+---
+
+### Step 7: Schedule Unknown Face Cleanup
+
+```python
+background_tasks.add_task(
+    _cleanup_session_unknowns_background,
+    s.id
+)
+```
+
+Schedules cleanup of unknown-face records associated with this session.
+
+Runs after API response is sent.
+
+---
+
+### Step 8: Schedule Retry Cleanup
+
+```python
+background_tasks.add_task(
+    _cleanup_session_unknowns_retry_background,
+    s.id
+)
+```
+
+Schedules retry cleanup process.
+
+Used if some unknown-face cleanup operations previously failed.
+
+---
+
+### Why Unknown Face Cleanup?
+
+During attendance recognition:
+
+```text
+Face Found
+   ↓
+No Student Match
+   ↓
+Stored as Unknown Face
+```
+
+Unknown faces are temporarily stored while session is active.
+
+When session ends:
+
+```text
+Session Completed
+      ↓
+Remove temporary unknown-face data
+      ↓
+Free storage and clean records
+```
+
+---
+
+### Step 9: Return Updated Session
+
+```python
+return _session_to_response(s)
+```
+
+Converts database model into API response.
+
+---
+
+## Internal Function
+
+```python
+def _session_to_response(
+    s: AttendanceSession
+) -> AttendanceSessionResponse:
+```
+
+Purpose:
+
+Converts database object into response schema.
+
+---
+
+```python
+return AttendanceSessionResponse(
+    id=s.id,
+    name=s.name,
+    session_type=s.session_type,
+    class_section=s.class_section,
+    student_class=s.student_class,
+    section=s.section,
+    status=s.status,
+    started_at=s.started_at,
+    ended_at=s.ended_at,
+)
+```
+
+Returned fields:
+
+| Field | Value |
+|---------|---------|
+| id | Session ID |
+| name | Session name |
+| session_type | Manual / Live |
+| class_section | Combined class-section |
+| student_class | Class |
+| section | Section |
+| status | COMPLETED |
+| started_at | Start time |
+| ended_at | End time |
+
+---
+
+## Example Flow
+
+```text
+Client
+   |
+   | POST /sessions/S1/complete
+   |
+   v
+Load Session
+   |
+Verify ACTIVE
+   |
+Mark COMPLETED
+   |
+Set ended_at
+   |
+Commit DB
+   |
+Schedule unknown-face cleanup
+   |
+Schedule retry cleanup
+   |
+Return updated session
+```
+
+---
+
+## Example Response
+
+```json
+{
+  "id": "S1",
+  "name": "Morning Attendance",
+  "session_type": "LIVE",
+  "class_section": "10-A",
+  "student_class": "10",
+  "section": "A",
+  "status": "COMPLETED",
+  "started_at": "2026-06-21T09:00:00Z",
+  "ended_at": "2026-06-21T09:15:30Z"
+}
+```
+<details>
