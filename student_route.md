@@ -1435,3 +1435,541 @@ Returns structured class and section fields separately.
 
 This format is more useful for frontend filters and dropdowns.
 </details>
+
+
+<details>
+<summary><b>GET /{student_id}/assignments - Student Assignments API</b></summary>
+
+## Endpoint
+
+```http
+GET /{student_id}/assignments
+```
+
+## Purpose
+
+Returns all active assignments associated with a specific student.
+
+This API is used to retrieve:
+
+- Student class assignments
+- Student section assignments
+- Subject assignments
+- Primary assignment information
+
+Only active assignments are returned.
+
+---
+
+## Authentication
+
+Required Role:
+
+```text
+Viewer
+```
+
+```python
+_user = RequireViewer
+```
+
+---
+
+## Path Parameters
+
+### student_id
+
+Student identifier.
+
+Example:
+
+```http
+GET /S001/assignments
+```
+
+Here:
+
+```text
+student_id = S001
+```
+
+---
+
+## Success Response
+
+```json
+[
+  {
+    "student_class": "III",
+    "section": "A",
+    "subject": "Math",
+    "is_primary": true,
+    "active": true
+  },
+  {
+    "student_class": "III",
+    "section": "A",
+    "subject": "Science",
+    "is_primary": false,
+    "active": true
+  }
+]
+```
+
+---
+
+## Error Response
+
+### Student Not Found
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+Status Code:
+
+```http
+404 Not Found
+```
+
+# Code Explanation
+
+## Route Definition
+
+```python
+@router.get(
+    "/{student_id}/assignments",
+    response_model=List[StudentAssignmentItem]
+)
+```
+
+Creates endpoint:
+
+```http
+GET /{student_id}/assignments
+```
+
+Example:
+
+```http
+GET /S001/assignments
+```
+
+Response type:
+
+```python
+List[StudentAssignmentItem]
+```
+
+which means:
+
+```json
+[
+  {},
+  {},
+  {}
+]
+```
+
+A list of assignment objects.
+
+---
+
+## Function Definition
+
+```python
+def list_student_assignments(
+    student_id: str,
+    db: Session = Depends(get_db),
+    _user=RequireViewer
+):
+```
+
+### student_id
+
+Obtained from the URL.
+
+Example:
+
+```http
+GET /S001/assignments
+```
+
+becomes:
+
+```python
+student_id = "S001"
+```
+
+---
+
+### Database Session
+
+```python
+db: Session = Depends(get_db)
+```
+
+Provides database access.
+
+---
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Ensures only authorized users can access the endpoint.
+
+---
+
+## Verify Student Exists
+
+```python
+student = (
+    db.query(Student)
+    .filter(Student.student_id == student_id)
+    .first()
+)
+```
+
+Checks whether the student exists.
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM students
+WHERE student_id = 'S001'
+LIMIT 1;
+```
+
+---
+
+## Handle Missing Student
+
+```python
+if not student:
+```
+
+If no student is found:
+
+```python
+raise HTTPException(
+    status_code=404,
+    detail="Student not found"
+)
+```
+
+Response:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+---
+
+## Load Student Assignments
+
+```python
+_load_assignments(
+    db,
+    student_id
+)
+```
+
+Loads all active assignments belonging to the student.
+
+---
+
+# _load_assignments Helper
+
+```python
+def _load_assignments(
+    db: Session,
+    student_id: str
+) -> list[StudentAssignment]:
+```
+
+Purpose:
+
+```text
+Retrieve all active assignments for a student
+and return them in a consistent order.
+```
+
+---
+
+## Query StudentAssignment Table
+
+```python
+db.query(StudentAssignment)
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM student_assignments
+```
+
+---
+
+## Filter By Student
+
+```python
+.filter(
+    StudentAssignment.student_id == student_id,
+```
+
+Example:
+
+```python
+student_id = "S001"
+```
+
+Equivalent SQL:
+
+```sql
+WHERE student_id = 'S001'
+```
+
+---
+
+## Filter Active Assignments
+
+```python
+StudentAssignment.active.is_(True)
+```
+
+Equivalent SQL:
+
+```sql
+AND active = TRUE
+```
+
+Only active assignments are returned.
+
+---
+
+## Sort Primary Assignments First
+
+```python
+StudentAssignment.is_primary.desc()
+```
+
+Sorting:
+
+```text
+True
+False
+False
+```
+
+Primary assignments appear before non-primary assignments.
+
+Equivalent SQL:
+
+```sql
+ORDER BY is_primary DESC
+```
+
+---
+
+## Sort By Class
+
+```python
+StudentAssignment.student_class.asc()
+```
+
+Example:
+
+```text
+II
+III
+IV
+V
+```
+
+Equivalent SQL:
+
+```sql
+student_class ASC
+```
+
+---
+
+## Sort By Section
+
+```python
+StudentAssignment.section.asc()
+```
+
+Example:
+
+```text
+A
+B
+C
+```
+
+Equivalent SQL:
+
+```sql
+section ASC
+```
+
+---
+
+## Sort By Subject
+
+```python
+StudentAssignment.subject.asc()
+```
+
+Example:
+
+```text
+English
+Math
+Science
+```
+
+Equivalent SQL:
+
+```sql
+subject ASC
+```
+
+---
+
+## Execute Query
+
+```python
+.all()
+```
+
+Runs the query and returns all matching assignments.
+
+Example result:
+
+```python
+[
+    StudentAssignment(...),
+    StudentAssignment(...),
+    StudentAssignment(...)
+]
+```
+
+---
+
+## Convert Database Rows To API Schema
+
+```python
+[
+    _assignment_row_to_schema(r)
+    for r in _load_assignments(db, student_id)
+]
+```
+
+Converts database objects into API response objects.
+
+Equivalent code:
+
+```python
+result = []
+
+for r in _load_assignments(db, student_id):
+    result.append(
+        _assignment_row_to_schema(r)
+    )
+
+return result
+```
+
+---
+
+## Example
+
+Database:
+
+```text
+student_id | class | section | subject | primary | active
+---------------------------------------------------------
+S001       | III   | A       | Math    | True    | True
+S001       | III   | A       | Science | False   | True
+S001       | III   | A       | English | False   | True
+S001       | II    | B       | Math    | False   | False
+```
+
+Call:
+
+```http
+GET /S001/assignments
+```
+
+Returned assignments:
+
+```text
+Math      (Primary)
+English
+Science
+```
+
+Inactive assignments are excluded.
+
+---
+
+## SQL Equivalent
+
+```sql
+SELECT *
+FROM student_assignments
+WHERE
+    student_id = 'S001'
+    AND active = TRUE
+ORDER BY
+    is_primary DESC,
+    student_class ASC,
+    section ASC,
+    subject ASC;
+```
+
+---
+
+## Complete Flow
+
+```text
+GET /{student_id}/assignments
+              |
+              v
+Check Viewer Permission
+              |
+              v
+Find Student
+              |
+        Student Exists?
+           /      \
+         No        Yes
+         |          |
+         v          v
+Return 404    Load Assignments
+                    |
+                    v
+        Filter Active Records
+                    |
+                    v
+      Sort Primary Assignments First
+                    |
+                    v
+ Convert To StudentAssignmentItem
+                    |
+                    v
+             Return Response
+```
+
+</details>
