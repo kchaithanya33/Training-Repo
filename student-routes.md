@@ -2480,3 +2480,2006 @@ Return Response
 
 </details>
 </details>
+
+<details>
+<summary><strong>API: DELETE /{student_id}/photos/{angle_index}</strong></summary>
+
+# API: DELETE /{student_id}/photos/{angle_index}
+
+## Operation Type
+
+```text
+CRUD Operation: DELETE
+
+HTTP Method: DELETE
+
+Purpose:
+Removes one enrolled face photo
+from a student.
+
+At least one face photo must
+always remain for the student.
+
+After deletion, all face
+embeddings are rebuilt using
+the remaining photos.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter   | Type | Required | Description                |
+| ----------- | ---- | -------- | -------------------------- |
+| student_id  | Path | Yes      | Student identifier         |
+| angle_index | Path | Yes      | Face photo angle to remove |
+
+---
+
+### Request Example
+
+```text
+DELETE /students/STU001/photos/2
+```
+
+---
+
+### Step 1: Find Student
+
+```python
+student = (
+    db.query(Student)
+    .filter(Student.student_id == student_id)
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Verify the student exists.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Load Student Photos
+
+```python
+rows = (
+    db.query(StudentFaceImage)
+    .filter(StudentFaceImage.student_id == student_id)
+    .order_by(StudentFaceImage.angle_index.asc())
+    .all()
+)
+```
+
+Purpose:
+
+```text
+Retrieve all enrolled face photos.
+```
+
+Example:
+
+```text
+Angle 0
+Angle 1
+Angle 2
+```
+
+---
+
+### Step 3: Verify Photo Deletion Is Allowed
+
+#### No Multi-Photo Records Found
+
+```python
+if not rows:
+```
+
+Check legacy enrollment:
+
+```python
+if student.minio_object_key:
+```
+
+Return:
+
+```json
+{
+  "detail": "Cannot delete the only stored photo. Replace it or remove the student."
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+---
+
+#### No Photos Exist
+
+```python
+raise HTTPException(
+    status_code=404,
+    detail="Photo not found"
+)
+```
+
+Return:
+
+```json
+{
+  "detail": "Photo not found"
+}
+```
+
+---
+
+#### Only One Photo Exists
+
+```python
+if len(rows) <= 1:
+```
+
+Purpose:
+
+```text
+Prevent deletion of the
+last remaining enrollment photo.
+```
+
+Return:
+
+```json
+{
+  "detail": "Cannot delete the only stored photo. Replace it or remove the student."
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+---
+
+### Step 4: Find Requested Photo
+
+```python
+target = next(
+    (
+        r for r in rows
+        if int(r.angle_index)
+        == int(angle_index)
+    ),
+    None
+)
+```
+
+Purpose:
+
+```text
+Locate the photo that
+must be deleted.
+```
+
+Photo Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Photo not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 5: Load Services
+
+```python
+storage_svc = get_storage_service()
+
+vector_svc = get_vector_db_service()
+```
+
+Purpose:
+
+```text
+Access storage and
+vector database services.
+```
+
+---
+
+### Step 6: Check Primary Status
+
+```python
+was_primary =
+bool(target.is_primary)
+```
+
+Purpose:
+
+```text
+Determine whether the
+deleted image is currently
+the primary display photo.
+```
+
+Example:
+
+```text
+True
+```
+
+---
+
+### Step 7: Delete Image From Storage
+
+```python
+storage_svc.delete_image(
+    target.minio_object_key
+)
+```
+
+Purpose:
+
+```text
+Remove image file from
+MinIO/Object Storage.
+```
+
+Storage Failure?
+
+#### YES
+
+```python
+logger.warning(...)
+```
+
+Purpose:
+
+```text
+Log warning and continue.
+
+Database cleanup should still occur.
+```
+
+---
+
+### Step 8: Delete Database Record
+
+```python
+db.delete(target)
+
+db.flush()
+```
+
+Purpose:
+
+```text
+Remove photo metadata from
+student_face_images table.
+```
+
+Equivalent SQL:
+
+```sql
+DELETE
+FROM student_face_images
+WHERE student_id='STU001'
+AND angle_index=2;
+```
+
+---
+
+### Step 9: Reassign Primary Photo
+
+Condition:
+
+```python
+if was_primary:
+```
+
+Purpose:
+
+```text
+If the deleted image was
+the primary image,
+assign a new primary image.
+```
+
+Load Remaining Photos:
+
+```python
+remaining = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .order_by(
+        StudentFaceImage.angle_index.asc()
+    )
+    .all()
+)
+```
+
+Reset Primary Flags:
+
+```python
+for row in remaining:
+    row.is_primary = False
+```
+
+Assign New Primary:
+
+```python
+remaining[0].is_primary = True
+```
+
+Example:
+
+```text
+Before:
+
+Angle 0 → False
+Angle 1 → True
+Angle 2 → False
+
+Delete Angle 1
+
+After:
+
+Angle 0 → True
+Angle 2 → False
+```
+
+---
+
+### Step 10: Mark Student As Processing
+
+```python
+student.enrollment_status =
+ENROLLMENT_STATUS_PROCESSING
+```
+
+Set Processing Time:
+
+```python
+student.enrollment_started_at =
+datetime.now(timezone.utc)
+```
+
+Clear Previous Error:
+
+```python
+student.enrollment_error = None
+```
+
+Purpose:
+
+```text
+Re-indexing is about to begin.
+```
+
+---
+
+### Step 11: Commit Changes
+
+```python
+db.commit()
+```
+
+Purpose:
+
+```text
+Persist photo deletion
+before rebuilding embeddings.
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _reindex_student_face_embeddings()</strong></summary>
+
+### Step 12: Rebuild Face Embeddings
+
+```python
+_reindex_student_face_embeddings(
+    db,
+    student,
+    storage_svc,
+    vector_svc
+)
+```
+
+Purpose:
+
+```text
+Delete old embeddings and
+generate new embeddings using
+remaining face photos.
+```
+
+Why?
+
+```text
+The removed photo may have
+contributed to recognition accuracy.
+
+Embeddings must remain consistent.
+```
+
+</details>
+
+---
+
+### Step 13: Mark Enrollment As Stored
+
+```python
+student.enrollment_status =
+ENROLLMENT_STATUS_STORED
+```
+
+Store Completion Time:
+
+```python
+student.enrollment_stored_at =
+datetime.now(timezone.utc)
+```
+
+Clear Errors:
+
+```python
+student.enrollment_error = None
+```
+
+Save:
+
+```python
+db.commit()
+```
+
+Purpose:
+
+```text
+Indicate successful reindexing.
+```
+
+---
+
+### Step 14: Handle Reindex Failures
+
+```python
+except Exception as e:
+```
+
+Rollback Current Transaction:
+
+```python
+db.rollback()
+```
+
+Reload Student:
+
+```python
+failed = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Mark Error State:
+
+```python
+failed.enrollment_status =
+ENROLLMENT_STATUS_ERROR
+
+failed.enrollment_error =
+str(e)
+```
+
+Save:
+
+```python
+db.commit()
+```
+
+Return:
+
+```json
+{
+  "detail": "Face photo delete reindex failed: ..."
+}
+```
+
+HTTP Status:
+
+```text
+500 Internal Server Error
+```
+
+---
+
+### Step 15: Count Remaining Photos
+
+```python
+remaining_count = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .count()
+)
+```
+
+Purpose:
+
+```text
+Determine how many photos
+remain after deletion.
+```
+
+Example:
+
+```text
+2
+```
+
+---
+
+### Step 16: Log Operation
+
+```python
+logger.info(
+    "Deleted face sample angle %s for %s (%s)",
+    angle_index,
+    student_id,
+    student.name
+)
+```
+
+Example Log:
+
+```text
+Deleted face sample angle 2
+for STU001 (John Doe)
+```
+
+---
+
+### Step 17: Return Response
+
+```python
+return {
+    "detail": "Photo removed",
+    "remaining_photos": remaining_count
+}
+```
+
+Example Response:
+
+```json
+{
+  "detail": "Photo removed",
+  "remaining_photos": 2
+}
+```
+
+---
+
+### Flow
+
+```text
+DELETE /{student_id}/photos/{angle_index}
+                    │
+                    ▼
+Find Student
+                    │
+                    ├── Not Found → 404
+                    │
+                    ▼
+Load Student Photos
+                    │
+                    ├── No Photos → 404
+                    │
+                    ├── Only One Photo → 400
+                    │
+                    ▼
+Find Target Photo
+                    │
+                    ├── Not Found → 404
+                    │
+                    ▼
+Delete Storage Object
+                    │
+                    ▼
+Delete Database Row
+                    │
+                    ▼
+Was Primary?
+                    │
+              ┌─────┴─────┐
+              │           │
+             YES          NO
+              │
+              ▼
+Assign New Primary
+              │
+              ▼
+Mark Processing
+              │
+              ▼
+Commit Changes
+              │
+              ▼
+Rebuild Embeddings
+              │
+        ┌─────┴─────┐
+        │           │
+     Success      Failure
+        │           │
+        ▼           ▼
+ Mark Stored    Mark Error
+        │           │
+        ▼           ▼
+     Return      HTTP 500
+```
+
+</details>
+</details>
+<details>
+<summary><strong>API: DELETE /{student_id}/photos/{angle_index}</strong></summary>
+
+# API: DELETE /{student_id}/photos/{angle_index}
+
+## Operation Type
+
+```text
+CRUD Operation: DELETE
+
+HTTP Method: DELETE
+
+Purpose:
+Removes one enrolled face photo
+from a student.
+
+At least one face photo must
+always remain for the student.
+
+After deletion, all face
+embeddings are rebuilt using
+the remaining photos.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter   | Type | Required | Description                |
+| ----------- | ---- | -------- | -------------------------- |
+| student_id  | Path | Yes      | Student identifier         |
+| angle_index | Path | Yes      | Face photo angle to remove |
+
+---
+
+### Request Example
+
+```text
+DELETE /students/STU001/photos/2
+```
+
+---
+
+### Step 1: Find Student
+
+```python
+student = (
+    db.query(Student)
+    .filter(Student.student_id == student_id)
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Verify the student exists.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Load Student Photos
+
+```python
+rows = (
+    db.query(StudentFaceImage)
+    .filter(StudentFaceImage.student_id == student_id)
+    .order_by(StudentFaceImage.angle_index.asc())
+    .all()
+)
+```
+
+Purpose:
+
+```text
+Retrieve all enrolled face photos.
+```
+
+Example:
+
+```text
+Angle 0
+Angle 1
+Angle 2
+```
+
+---
+
+### Step 3: Verify Photo Deletion Is Allowed
+
+#### No Multi-Photo Records Found
+
+```python
+if not rows:
+```
+
+Check legacy enrollment:
+
+```python
+if student.minio_object_key:
+```
+
+Return:
+
+```json
+{
+  "detail": "Cannot delete the only stored photo. Replace it or remove the student."
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+---
+
+#### No Photos Exist
+
+```python
+raise HTTPException(
+    status_code=404,
+    detail="Photo not found"
+)
+```
+
+Return:
+
+```json
+{
+  "detail": "Photo not found"
+}
+```
+
+---
+
+#### Only One Photo Exists
+
+```python
+if len(rows) <= 1:
+```
+
+Purpose:
+
+```text
+Prevent deletion of the
+last remaining enrollment photo.
+```
+
+Return:
+
+```json
+{
+  "detail": "Cannot delete the only stored photo. Replace it or remove the student."
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+---
+
+### Step 4: Find Requested Photo
+
+```python
+target = next(
+    (
+        r for r in rows
+        if int(r.angle_index)
+        == int(angle_index)
+    ),
+    None
+)
+```
+
+Purpose:
+
+```text
+Locate the photo that
+must be deleted.
+```
+
+Photo Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Photo not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 5: Load Services
+
+```python
+storage_svc = get_storage_service()
+
+vector_svc = get_vector_db_service()
+```
+
+Purpose:
+
+```text
+Access storage and
+vector database services.
+```
+
+---
+
+### Step 6: Check Primary Status
+
+```python
+was_primary =
+bool(target.is_primary)
+```
+
+Purpose:
+
+```text
+Determine whether the
+deleted image is currently
+the primary display photo.
+```
+
+Example:
+
+```text
+True
+```
+
+---
+
+### Step 7: Delete Image From Storage
+
+```python
+storage_svc.delete_image(
+    target.minio_object_key
+)
+```
+
+Purpose:
+
+```text
+Remove image file from
+MinIO/Object Storage.
+```
+
+Storage Failure?
+
+#### YES
+
+```python
+logger.warning(...)
+```
+
+Purpose:
+
+```text
+Log warning and continue.
+
+Database cleanup should still occur.
+```
+
+---
+
+### Step 8: Delete Database Record
+
+```python
+db.delete(target)
+
+db.flush()
+```
+
+Purpose:
+
+```text
+Remove photo metadata from
+student_face_images table.
+```
+
+Equivalent SQL:
+
+```sql
+DELETE
+FROM student_face_images
+WHERE student_id='STU001'
+AND angle_index=2;
+```
+
+---
+
+### Step 9: Reassign Primary Photo
+
+Condition:
+
+```python
+if was_primary:
+```
+
+Purpose:
+
+```text
+If the deleted image was
+the primary image,
+assign a new primary image.
+```
+
+Load Remaining Photos:
+
+```python
+remaining = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .order_by(
+        StudentFaceImage.angle_index.asc()
+    )
+    .all()
+)
+```
+
+Reset Primary Flags:
+
+```python
+for row in remaining:
+    row.is_primary = False
+```
+
+Assign New Primary:
+
+```python
+remaining[0].is_primary = True
+```
+
+Example:
+
+```text
+Before:
+
+Angle 0 → False
+Angle 1 → True
+Angle 2 → False
+
+Delete Angle 1
+
+After:
+
+Angle 0 → True
+Angle 2 → False
+```
+
+---
+
+### Step 10: Mark Student As Processing
+
+```python
+student.enrollment_status =
+ENROLLMENT_STATUS_PROCESSING
+```
+
+Set Processing Time:
+
+```python
+student.enrollment_started_at =
+datetime.now(timezone.utc)
+```
+
+Clear Previous Error:
+
+```python
+student.enrollment_error = None
+```
+
+Purpose:
+
+```text
+Re-indexing is about to begin.
+```
+
+---
+
+### Step 11: Commit Changes
+
+```python
+db.commit()
+```
+
+Purpose:
+
+```text
+Persist photo deletion
+before rebuilding embeddings.
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _reindex_student_face_embeddings()</strong></summary>
+
+### Step 12: Rebuild Face Embeddings
+
+```python
+_reindex_student_face_embeddings(
+    db,
+    student,
+    storage_svc,
+    vector_svc
+)
+```
+
+Purpose:
+
+```text
+Delete old embeddings and
+generate new embeddings using
+remaining face photos.
+```
+
+Why?
+
+```text
+The removed photo may have
+contributed to recognition accuracy.
+
+Embeddings must remain consistent.
+```
+
+</details>
+
+---
+
+### Step 13: Mark Enrollment As Stored
+
+```python
+student.enrollment_status =
+ENROLLMENT_STATUS_STORED
+```
+
+Store Completion Time:
+
+```python
+student.enrollment_stored_at =
+datetime.now(timezone.utc)
+```
+
+Clear Errors:
+
+```python
+student.enrollment_error = None
+```
+
+Save:
+
+```python
+db.commit()
+```
+
+Purpose:
+
+```text
+Indicate successful reindexing.
+```
+
+---
+
+### Step 14: Handle Reindex Failures
+
+```python
+except Exception as e:
+```
+
+Rollback Current Transaction:
+
+```python
+db.rollback()
+```
+
+Reload Student:
+
+```python
+failed = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Mark Error State:
+
+```python
+failed.enrollment_status =
+ENROLLMENT_STATUS_ERROR
+
+failed.enrollment_error =
+str(e)
+```
+
+Save:
+
+```python
+db.commit()
+```
+
+Return:
+
+```json
+{
+  "detail": "Face photo delete reindex failed: ..."
+}
+```
+
+HTTP Status:
+
+```text
+500 Internal Server Error
+```
+
+---
+
+### Step 15: Count Remaining Photos
+
+```python
+remaining_count = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .count()
+)
+```
+
+Purpose:
+
+```text
+Determine how many photos
+remain after deletion.
+```
+
+Example:
+
+```text
+2
+```
+
+---
+
+### Step 16: Log Operation
+
+```python
+logger.info(
+    "Deleted face sample angle %s for %s (%s)",
+    angle_index,
+    student_id,
+    student.name
+)
+```
+
+Example Log:
+
+```text
+Deleted face sample angle 2
+for STU001 (John Doe)
+```
+
+---
+
+### Step 17: Return Response
+
+```python
+return {
+    "detail": "Photo removed",
+    "remaining_photos": remaining_count
+}
+```
+
+Example Response:
+
+```json
+{
+  "detail": "Photo removed",
+  "remaining_photos": 2
+}
+```
+
+---
+
+### Flow
+
+```text
+DELETE /{student_id}/photos/{angle_index}
+                    │
+                    ▼
+Find Student
+                    │
+                    ├── Not Found → 404
+                    │
+                    ▼
+Load Student Photos
+                    │
+                    ├── No Photos → 404
+                    │
+                    ├── Only One Photo → 400
+                    │
+                    ▼
+Find Target Photo
+                    │
+                    ├── Not Found → 404
+                    │
+                    ▼
+Delete Storage Object
+                    │
+                    ▼
+Delete Database Row
+                    │
+                    ▼
+Was Primary?
+                    │
+              ┌─────┴─────┐
+              │           │
+             YES          NO
+              │
+              ▼
+Assign New Primary
+              │
+              ▼
+Mark Processing
+              │
+              ▼
+Commit Changes
+              │
+              ▼
+Rebuild Embeddings
+              │
+        ┌─────┴─────┐
+        │           │
+     Success      Failure
+        │           │
+        ▼           ▼
+ Mark Stored    Mark Error
+        │           │
+        ▼           ▼
+     Return      HTTP 500
+```
+
+</details>
+</details>
+
+<details>
+<summary><strong>API: DELETE /{student_id}</strong></summary>
+
+# API: DELETE /{student_id}
+
+## Operation Type
+
+```text id="v3z6o1"
+CRUD Operation: DELETE
+
+HTTP Method: DELETE
+
+Purpose:
+Completely removes a student
+from the system.
+
+This includes:
+
+• Student record
+• Face embeddings
+• Face images
+• Assignments
+
+Used when a student is
+permanently removed from
+the attendance system.
+```
+
+### Authentication
+
+```python id="m0e3k8"
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter  | Type | Required | Description        |
+| ---------- | ---- | -------- | ------------------ |
+| student_id | Path | Yes      | Student identifier |
+
+---
+
+### Request Example
+
+```text id="x7q2lp"
+DELETE /students/STU001
+```
+
+---
+
+### Step 1: Find Student
+
+```python id="qz7bkp"
+student = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Purpose:
+
+```text id="a5vmzw"
+Verify student exists.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json id="whh5j4"
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text id="3b6lj0"
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Load Vector DB Service
+
+```python id="8m3qxr"
+vector_svc =
+get_vector_db_service()
+```
+
+Purpose:
+
+```text id="c3vd4o"
+Access Milvus/Vector DB
+for embedding cleanup.
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _load_assignments()</strong></summary>
+
+### Step 3: Load Student Assignments
+
+```python id="k3oqt8"
+assignments =
+_load_assignments(
+    db,
+    student_id
+)
+```
+
+Purpose:
+
+```text id="5vuj9h"
+Retrieve all class-section
+assignments for the student.
+```
+
+Example:
+
+```text id="yw8n3m"
+III-F
+IV-A
+Math Subject
+Science Subject
+```
+
+</details>
+
+---
+
+### Step 4: Determine Vector DB Scopes
+
+```python id="9jz4dw"
+scopes = {
+    a.class_section
+    for a in assignments
+    if a.class_section
+}
+```
+
+Purpose:
+
+```text id="tr5f6m"
+Find all Milvus collections
+where embeddings may exist.
+```
+
+Example:
+
+```python id="8i6hqt"
+{
+    "III-F",
+    "IV-A"
+}
+```
+
+---
+
+### Step 5: Fallback Scope
+
+```python id="w4suyf"
+if not scopes:
+```
+
+```python id="jlwm0j"
+scopes = {
+    student.class_section
+}
+```
+
+Purpose:
+
+```text id="s58h5o"
+Ensure at least one
+scope exists for cleanup.
+```
+
+Example:
+
+```python id="1t4p3f"
+{
+    "III-F"
+}
+```
+
+---
+
+### Step 6: Delete Embeddings
+
+```python id="2g6gti"
+for scope in scopes:
+```
+
+```python id="u0swyz"
+vector_svc.delete_embedding(
+    scope,
+    student_id
+)
+```
+
+Purpose:
+
+```text id="x44n5q"
+Remove all face embeddings
+from the vector database.
+```
+
+Example:
+
+```text id="8a4y0k"
+Milvus Collection:
+III-F
+
+Delete:
+STU001
+```
+
+---
+
+### Step 7: Handle Vector DB Failures
+
+```python id="1d4h7u"
+except Exception as e:
+```
+
+Log Error:
+
+```python id="fjm3ko"
+logger.warning(...)
+```
+
+Example Log:
+
+```text id="eqq7lk"
+Failed to delete embedding
+from vector DB for STU001
+```
+
+Purpose:
+
+```text id="l6gkgh"
+Continue student removal
+even if vector cleanup fails.
+
+Database consistency is
+more important.
+```
+
+---
+
+### Step 8: Load Face Images
+
+```python id="w6gz5m"
+face_rows = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .all()
+)
+```
+
+Purpose:
+
+```text id="x4dk53"
+Retrieve all stored
+face image records.
+```
+
+Example:
+
+```text id="dcmjgm"
+Angle 0
+Angle 1
+Angle 2
+```
+
+---
+
+### Step 9: Load Storage Service
+
+```python id="f6w7nr"
+storage_svc =
+get_storage_service()
+```
+
+Purpose:
+
+```text id="yq6r4o"
+Access MinIO/Object Storage.
+```
+
+---
+
+### Step 10: Delete Face Images
+
+```python id="rjkf2h"
+for row in face_rows:
+```
+
+Delete Object:
+
+```python id="pk0e4d"
+storage_svc.delete_image(
+    row.minio_object_key
+)
+```
+
+Purpose:
+
+```text id="8l8j8x"
+Remove all enrolled
+face image files.
+```
+
+Example:
+
+```text id="8ryv2j"
+III-F/STU001_0.jpg
+III-F/STU001_1.jpg
+III-F/STU001_2.jpg
+```
+
+---
+
+### Step 11: Handle Storage Failures
+
+```python id="d4gj8q"
+except Exception as e:
+```
+
+Log Error:
+
+```python id="u4rk7j"
+logger.warning(...)
+```
+
+Purpose:
+
+```text id="vk5x4u"
+Continue deletion even if
+an image cannot be removed.
+```
+
+Example:
+
+```text id="wkn41m"
+Failed to delete face image
+III-F/STU001_1.jpg
+```
+
+---
+
+### Step 12: Remove StudentFaceImage Records
+
+```python id="9j3gkp"
+db.query(StudentFaceImage)
+.filter(
+    StudentFaceImage.student_id
+    == student_id
+)
+.delete()
+```
+
+Equivalent SQL:
+
+```sql id="e4f2ma"
+DELETE
+FROM student_face_images
+WHERE student_id='STU001';
+```
+
+Purpose:
+
+```text id="2rhlw5"
+Remove all photo metadata.
+```
+
+---
+
+### Step 13: Handle Photo Cleanup Errors
+
+```python id="l7nq9o"
+except Exception as e:
+```
+
+Log Error:
+
+```python id="8n5qde"
+logger.warning(...)
+```
+
+Purpose:
+
+```text id="w3g4w6"
+Continue deletion process
+even if photo cleanup fails.
+```
+
+---
+
+### Step 14: Legacy Image Cleanup
+
+```python id="5v4g6y"
+get_storage_service()
+.delete_image(
+    student.minio_object_key
+)
+```
+
+Purpose:
+
+```text id="4tuwto"
+Remove old single-photo
+enrollment image.
+```
+
+Note:
+
+```text id="63r3wa"
+May overlap with a primary
+multi-photo image.
+
+This is safe.
+```
+
+---
+
+### Step 15: Handle Legacy Cleanup Failure
+
+```python id="8i1ozz"
+except Exception as e:
+```
+
+Log Error:
+
+```python id="wdr6li"
+logger.warning(...)
+```
+
+Example:
+
+```text id="jix7b4"
+Failed to delete image
+from MinIO
+```
+
+---
+
+### Step 16: Delete Student Record
+
+```python id="v2k9bw"
+db.delete(student)
+```
+
+Purpose:
+
+```text id="9kqv2f"
+Remove student from
+students table.
+```
+
+Equivalent SQL:
+
+```sql id="6q4pwu"
+DELETE
+FROM students
+WHERE student_id='STU001';
+```
+
+---
+
+### Step 17: Delete Assignments
+
+```python id="e6z4gk"
+db.query(StudentAssignment)
+.filter(
+    StudentAssignment.student_id
+    == student_id
+)
+.delete()
+```
+
+Purpose:
+
+```text id="52szcz"
+Remove all class, section,
+and subject assignments.
+```
+
+Equivalent SQL:
+
+```sql id="xv8zsj"
+DELETE
+FROM student_assignment
+WHERE student_id='STU001';
+```
+
+---
+
+### Step 18: Commit Changes
+
+```python id="xyv3o2"
+db.commit()
+```
+
+Purpose:
+
+```text id="ym9z9r"
+Persist all deletions.
+```
+
+---
+
+### Step 19: Return Response
+
+```python id="2e4gcv"
+return {
+    "detail":
+    f"Student {student_id}
+    ({student.name})
+    removed"
+}
+```
+
+Example Response:
+
+```json id="p8p4a0"
+{
+  "detail": "Student STU001 (John Doe) removed"
+}
+```
+
+---
+
+### Flow
+
+```text id="4c4f1o"
+DELETE /{student_id}
+          │
+          ▼
+Find Student
+          │
+          ├── Not Found → 404
+          │
+          ▼
+Load Assignments
+          │
+          ▼
+Determine Scopes
+          │
+          ▼
+Delete Vector Embeddings
+          │
+          ├── Failure → Log Warning
+          │
+          ▼
+Load Face Images
+          │
+          ▼
+Delete Image Files
+          │
+          ├── Failure → Log Warning
+          │
+          ▼
+Delete StudentFaceImage Rows
+          │
+          ▼
+Delete Legacy Image
+          │
+          ├── Failure → Log Warning
+          │
+          ▼
+Delete Student Record
+          │
+          ▼
+Delete Assignments
+          │
+          ▼
+Commit Changes
+          │
+          ▼
+Return Success
+```
+
+</details>
+</details>
