@@ -394,4 +394,94 @@ reference_id = "123"
 
 This class serves as the core request mapper from MOSIP to BioChq ABIS.
 </details>
+<details><summary><b>BioChqToMOSIPMapper Class</b></summary>
+
+**Class:** `BioChqToMOSIPMapper`
+
+**Purpose:**  
+Converts BioChq responses into the format expected by MOSIP.
+
+This is the **reverse mapper** of `MOSIPToBioChqMapper`.
+
+```
+BioChq Response
+    ↓
+BioChqToMOSIPMapper
+    ↓
+MOSIP Response
+```
+
+Handles:
+- Insert Response
+- Identify Response
+- Delete Response
+- Error Codes
+- Candidate Results
+
+---
+
+## Main Functions
+
+### 1. `map_insert_response()`
+
+Converts BioChq enrollment response to MOSIP Insert response.
+
+- Reads `status`, `galleryId`, `errorCode`
+- Sets `returnValue` → `"1"` (Success) or `"2"` (Failure)
+- Maps errors using `_map_error_code()`
+
+**MOSIP Output:**
+```json
+{
+  "id": "mosip.abis.insert",
+  "requestId": "...",
+  "responsetime": "2025-...",
+  "returnValue": "1"
+}
+```
+
+---
+
+### 2. `map_identify_response()`
+
+Converts BioChq search results to MOSIP Identify response.
+
+- Extracts `searchResults`
+- Converts each result using `_map_candidate()`
+- Builds `candidateList` with count and candidates
+
+**MOSIP Output:**
+```json
+{
+  "id": "mosip.abis.identify",
+  "requestId": "...",
+  "returnValue": "1",
+  "candidateList": { ... }
+}
+```
+
+---
+
+### 3. `map_delete_response()`
+
+Converts BioChq delete response to MOSIP Delete response.
+
+- Sets `returnValue` → `"1"` (Success) or `"2"` (Failure)
+
+---
+
+## Helper Functions
+
+- **`_map_candidate()`** — Converts one BioChq match to MOSIP candidate (referenceId, analytics, modalities)
+- **`_map_error_code()`** — Maps BioChq errors to MOSIP error codes (e.g. `INVALID_IMAGE` → `7`)
+- **`_map_bio_type()`** — FID → Face, FIR → Finger, IIR → Iris
+- **`_normalize_reference_id()`** — Cleans BioChq reference IDs
+- **`_map_failure_reason()`** — Maps failure reasons for Identify
+
+---
+
+This class ensures full compatibility when sending responses back to MOSIP.
+
 </details>
+</details>
+
