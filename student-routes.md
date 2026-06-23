@@ -1811,3 +1811,672 @@ Return JPEG Image
 
 </details>
 </details>
+
+<details>
+<summary><strong>API: GET /{student_id}</strong></summary>
+
+# API: GET /{student_id}
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+
+HTTP Method: GET
+
+Purpose:
+Returns basic student information
+including enrollment details,
+assignments, and currently active
+face recognition algorithms.
+```
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Viewer, Operator, and Admin users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter  | Type | Required | Description        |
+| ---------- | ---- | -------- | ------------------ |
+| student_id | Path | Yes      | Student identifier |
+
+---
+
+### Request Example
+
+```text
+GET /students/STU001
+```
+
+---
+
+### Step 1: Find Student
+
+```python
+student = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Verify student exists and
+retrieve student information.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Load Face Service
+
+```python
+face_svc = get_face_service()
+```
+
+Purpose:
+
+```text
+Access face recognition
+configuration and runtime settings.
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: get_runtime_algorithms()</strong></summary>
+
+### Step 3: Get Active Runtime Algorithms
+
+```python
+runtime_detector_backend,
+runtime_recognition_model = (
+    face_svc.get_runtime_algorithms()
+)
+```
+
+Purpose:
+
+```text
+Retrieve currently active
+face detection and face
+recognition models.
+```
+
+Example:
+
+```python
+runtime_detector_backend =
+"retinaface"
+
+runtime_recognition_model =
+"ArcFace"
+```
+
+Possible Values:
+
+```text
+Detection:
+RetinaFace
+OpenCV
+YuNet
+
+Recognition:
+ArcFace
+Facenet
+Buffalo_L
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Internal Function: _load_assignments()</strong></summary>
+
+### Step 4: Load Student Assignments
+
+```python
+_load_assignments(
+    db,
+    student.student_id
+)
+```
+
+Purpose:
+
+```text
+Retrieve all active class,
+section, and subject assignments
+for the student.
+```
+
+Example:
+
+```python
+[
+    {
+        "student_class": "III",
+        "section": "F"
+    }
+]
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Internal Function: _student_response()</strong></summary>
+
+### Step 5: Build Response Object
+
+```python
+return _student_response(
+    student,
+    _load_assignments(
+        db,
+        student.student_id
+    ),
+    runtime_detector_backend,
+    runtime_recognition_model
+)
+```
+
+Purpose:
+
+```text
+Convert database entities into
+StudentResponse format.
+```
+
+Included Information:
+
+```text
+Student ID
+Student Name
+Class Section
+Assignments
+Enrollment Status
+Runtime Detector
+Runtime Recognition Model
+```
+
+</details>
+
+---
+
+### Step 6: Return Response
+
+Example Response:
+
+```json
+{
+  "student_id": "STU001",
+  "name": "John Doe",
+  "class_section": "III-F",
+  "runtime_detector_backend": "retinaface",
+  "runtime_recognition_model": "ArcFace"
+}
+```
+
+---
+
+### Flow
+
+```text
+GET /{student_id}
+        │
+        ▼
+Find Student
+        │
+        ├── Not Found → 404
+        │
+        ▼
+Load Face Service
+        │
+        ▼
+Get Runtime Algorithms
+        │
+        ▼
+Load Assignments
+        │
+        ▼
+Build StudentResponse
+        │
+        ▼
+Return Response
+```
+
+</details>
+</details>
+<details>
+<summary><strong>API: GET /{student_id}/detail</strong></summary>
+
+# API: GET /{student_id}/detail
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+
+HTTP Method: GET
+
+Purpose:
+Returns complete student information
+including enrollment status,
+assignments, photos, runtime models,
+timestamps, and enrollment metadata.
+```
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Viewer, Operator, and Admin users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter  | Type | Required | Description        |
+| ---------- | ---- | -------- | ------------------ |
+| student_id | Path | Yes      | Student identifier |
+
+---
+
+### Request Example
+
+```text
+GET /students/STU001/detail
+```
+
+---
+
+### Step 1: Find Student
+
+```python
+student = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Verify student exists.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Load Face Service
+
+```python
+face_svc = get_face_service()
+```
+
+Purpose:
+
+```text
+Access runtime face recognition
+configuration.
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: get_runtime_algorithms()</strong></summary>
+
+### Step 3: Get Runtime Algorithms
+
+```python
+runtime_detector_backend,
+runtime_recognition_model = (
+    face_svc.get_runtime_algorithms()
+)
+```
+
+Purpose:
+
+```text
+Determine which face detection
+and recognition models are
+currently active.
+```
+
+Example:
+
+```text
+Detector:
+RetinaFace
+
+Recognition:
+ArcFace
+```
+
+</details>
+
+---
+
+### Step 4: Load Student Photos
+
+```python
+rows = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .order_by(
+        StudentFaceImage.angle_index.asc()
+    )
+    .all()
+)
+```
+
+Purpose:
+
+```text
+Retrieve all enrolled
+student photos.
+```
+
+Example:
+
+```text
+Angle 0
+Angle 1
+Angle 2
+```
+
+---
+
+### Step 5: Build Photo Response
+
+#### Multi-Photo Enrollment
+
+```python
+if rows:
+```
+
+Convert rows:
+
+```python
+StudentPhotoItem(
+    angle_index=r.angle_index,
+    is_primary=bool(r.is_primary),
+    photo_url=f"/api/students/{student_id}/photos/{r.angle_index}"
+)
+```
+
+Example:
+
+```json
+[
+  {
+    "angle_index": 0,
+    "is_primary": true
+  },
+  {
+    "angle_index": 1,
+    "is_primary": false
+  }
+]
+```
+
+---
+
+#### Legacy Single Photo
+
+```python
+elif student.minio_object_key:
+```
+
+Build fallback photo:
+
+```python
+StudentPhotoItem(
+    angle_index=0,
+    is_primary=True,
+    photo_url=f"/api/students/{student_id}/photo"
+)
+```
+
+Purpose:
+
+```text
+Support older enrollment records.
+```
+
+---
+
+#### No Photos
+
+```python
+else:
+    photos = []
+```
+
+Example:
+
+```json
+[]
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _load_assignments()</strong></summary>
+
+### Step 6: Load Assignments
+
+```python
+_load_assignments(
+    db,
+    student.student_id
+)
+```
+
+Purpose:
+
+```text
+Retrieve all active student
+assignments.
+```
+
+Example:
+
+```text
+Class Assignment
+Subject Assignment
+Section Assignment
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Internal Function: _assignment_row_to_schema()</strong></summary>
+
+### Step 7: Convert Assignments
+
+```python
+[
+    _assignment_row_to_schema(a)
+    .dict()
+    for a in _load_assignments(...)
+]
+```
+
+Purpose:
+
+```text
+Convert database assignment
+objects into API schema format.
+```
+
+Example:
+
+```json
+{
+  "student_class": "III",
+  "section": "F",
+  "is_primary": true
+}
+```
+
+</details>
+
+---
+
+### Step 8: Build Detail Response
+
+```python
+StudentDetailResponse(
+    ...
+)
+```
+
+Included Fields:
+
+```text
+Student ID
+Name
+Class Section
+Student Class
+Section
+Enrollment Status
+Enrollment Started Time
+Enrollment Stored Time
+Enrollment Errors
+Runtime Detector
+Runtime Recognition Model
+Created Time
+Updated Time
+Assignments
+Photos
+```
+
+---
+
+### Step 9: Return Response
+
+Example Response:
+
+```json
+{
+  "student_id": "STU001",
+  "name": "John Doe",
+  "class_section": "III-F",
+  "enrollment_status": "COMPLETED",
+  "runtime_detector_backend": "retinaface",
+  "runtime_recognition_model": "ArcFace",
+  "photos": [
+    {
+      "angle_index": 0,
+      "is_primary": true
+    }
+  ]
+}
+```
+
+---
+
+### Flow
+
+```text
+GET /{student_id}/detail
+            │
+            ▼
+Find Student
+            │
+            ├── Not Found → 404
+            │
+            ▼
+Load Face Service
+            │
+            ▼
+Get Runtime Algorithms
+            │
+            ▼
+Load Student Photos
+            │
+            ▼
+Build Photo List
+            │
+            ▼
+Load Assignments
+            │
+            ▼
+Convert Assignments
+            │
+            ▼
+Build StudentDetailResponse
+            │
+            ▼
+Return Response
+```
+
+</details>
+</details>
