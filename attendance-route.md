@@ -3438,4 +3438,798 @@ Final Flow
 5. Return image response
  
 </details>
- 
+ </details>
+
+ <details>
+<summary><strong>API: GET /records/tree</strong></summary>
+
+# API: GET /records/tree
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns attendance history in a hierarchical
+tree structure grouped by:
+
+Date
+ └─ Class
+     └─ Section
+         └─ Session
+
+Each node contains attendance counts and is
+used for Attendance History tree navigation.
+```
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Viewer, Operator, and Admin users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter | Type | Required | Description |
+|------------|--------|----------|-------------|
+| date | string | No | Filter a specific date |
+| start_date | string | No | Filter start date |
+| end_date | string | No | Filter end date |
+| class_section | string | No | Example: III-F |
+| student_class | string | No | Example: III |
+| section | string | No | Example: F |
+| session_id | string | No | Filter by session |
+
+---
+
+### Step 1: Build Query
+
+```python
+q = (
+    db.query(
+        AttendanceRecord.date,
+        AttendanceRecord.student_class,
+        AttendanceRecord.section,
+        AttendanceRecord.session_id,
+        AttendanceSession.name,
+        AttendanceSession.session_type,
+        func.count(AttendanceRecord.id),
+    )
+    .outerjoin(
+        AttendanceSession,
+        AttendanceRecord.session_id == AttendanceSession.id,
+    )
+)
+```
+
+Purpose:
+
+```text
+Fetch attendance records together with
+their session information.
+
+Also calculate record counts.
+```
+
+Equivalent SQL:
+
+```sql
+SELECT
+    ar.date,
+    ar.student_class,
+    ar.section,
+    ar.session_id,
+    s.name,
+    s.session_type,
+    COUNT(ar.id)
+FROM attendance_records ar
+LEFT JOIN attendance_sessions s
+ON ar.session_id = s.id;
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _apply_attendance_records_filters()</strong></summary>
+
+### Step 2: Apply Filters
+
+```python
+q = _apply_attendance_records_filters(
+    q,
+    date,
+    start_date,
+    end_date,
+    class_section,
+    student_class,
+    section,
+    session_id,
+)
+```
+
+Purpose:
+
+```text
+Applies all requested filters to the query.
+```
+
+Possible Filters:
+
+```text
+Date
+Date Range
+Class
+Section
+Class-Section
+Session ID
+```
+
+Example:
+
+```text
+student_class = III
+section = F
+```
+
+Equivalent SQL:
+
+```sql
+WHERE student_class='III'
+AND section='F'
+```
+
+</details>
+
+---
+
+### Step 3: Group Records
+
+```python
+q = q.group_by(
+    AttendanceRecord.date,
+    AttendanceRecord.student_class,
+    AttendanceRecord.section,
+    AttendanceRecord.session_id,
+    AttendanceSession.name,
+    AttendanceSession.session_type,
+)
+```
+
+Purpose:
+
+```text
+Create unique groups for:
+
+Date
+Class
+Section
+Session
+```
+
+Example:
+
+```text
+2026-06-21
+   III
+      F
+         Morning Attendance
+```
+
+Count will represent:
+
+```text
+Number of attendance records
+inside that session.
+```
+
+Equivalent SQL:
+
+```sql
+GROUP BY
+date,
+student_class,
+section,
+session_id,
+name,
+session_type
+```
+
+---
+
+### Step 4: Sort Results
+
+```python
+.order_by(
+    AttendanceRecord.date.desc(),
+    AttendanceRecord.student_class.asc(),
+    AttendanceRecord.section.asc(),
+    AttendanceSession.name.asc().nulls_last(),
+)
+```
+
+Sorting Order:
+
+```text
+Newest Date First
+      ↓
+Class Ascending
+      ↓
+Section Ascending
+      ↓
+Session Name Ascending
+```
+
+Example:
+
+```text
+2026-06-22
+2026-06-21
+2026-06-20
+```
+
+---
+
+### Step 5: Execute Query
+
+```python
+rows = q.all()
+```
+
+Purpose:
+
+```text
+Run SQL query and fetch all grouped rows.
+```
+
+Example Result:
+
+```python
+[
+    (
+        "2026-06-21",
+        "III",
+        "F",
+        "123",
+        "Morning Attendance",
+        "class",
+        42
+    )
+]
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: build_attendance_records_tree()</strong></summary>
+
+### Step 6: Build Tree Structure
+
+```python
+return build_attendance_records_tree(rows)
+```
+
+Purpose:
+
+```text
+Convert flat database rows into
+hierarchical tree format.
+```
+
+Input:
+
+```python
+[
+    (
+        date,
+        class,
+        section,
+        session_id,
+        session_name,
+        session_type,
+        count
+    )
+]
+```
+
+Output Structure:
+
+```text
+Date
+ └─ Class
+     └─ Section
+         └─ Session
+```
+
+Example:
+
+```json
+{
+  "dates": [
+    {
+      "date": "2026-06-21",
+      "classes": [
+        {
+          "student_class": "III",
+          "sections": [
+            {
+              "section": "F",
+              "sessions": [
+                {
+                  "session_name": "Morning Attendance",
+                  "count": 42
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>
+
+---
+
+### Flow
+
+```text
+GET /records/tree
+        │
+        ▼
+Build Query
+        │
+        ▼
+LEFT JOIN AttendanceSession
+        │
+        ▼
+Apply Filters
+        │
+        ▼
+GROUP BY
+(Date/Class/Section/Session)
+        │
+        ▼
+ORDER BY
+        │
+        ▼
+q.all()
+        │
+        ▼
+build_attendance_records_tree()
+        │
+        ▼
+Return Tree Response
+```
+
+</details>
+</details>
+
+<details>
+<summary><strong>API: GET /records</strong></summary>
+
+# API: GET /records
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+HTTP Method: GET
+
+Purpose:
+Returns attendance records in a flat,
+paginated list format.
+
+Used by attendance history tables,
+reports, and search screens.
+```
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Viewer, Operator, and Admin users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter | Type | Required | Description |
+|------------|--------|----------|-------------|
+| date | string | No | Specific date |
+| start_date | string | No | Start date |
+| end_date | string | No | End date |
+| class_section | string | No | Example: III-F |
+| student_class | string | No | Example: III |
+| section | string | No | Example: F |
+| session_id | string | No | Session filter |
+| skip | int | No | Pagination offset |
+| limit | int | No | Maximum records |
+
+---
+
+<details>
+<summary><strong>Internal Function: _apply_attendance_records_filters()</strong></summary>
+
+### Step 1: Build Count Query
+
+```python
+count_q = _apply_attendance_records_filters(
+    db.query(AttendanceRecord),
+    date,
+    start_date,
+    end_date,
+    class_section,
+    student_class,
+    section,
+    session_id,
+)
+```
+
+Purpose:
+
+```text
+Apply all filters before counting records.
+```
+
+Example Filters:
+
+```text
+Date
+Date Range
+Class
+Section
+Session
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM attendance_records
+WHERE ...
+```
+
+</details>
+
+---
+
+### Step 2: Calculate Total Records
+
+```python
+total = count_q.count()
+```
+
+Purpose:
+
+```text
+Calculate total matching records.
+```
+
+Example:
+
+```text
+total = 250
+```
+
+Used for:
+
+```text
+Pagination
+Page Count
+UI Record Count
+```
+
+Equivalent SQL:
+
+```sql
+SELECT COUNT(*)
+FROM attendance_records
+WHERE ...
+```
+
+---
+
+### Step 3: Build Main Query
+
+```python
+joined_q = db.query(
+    AttendanceRecord,
+    AttendanceSession
+)
+```
+
+Purpose:
+
+```text
+Fetch attendance records together
+with session information.
+```
+
+---
+
+### Step 4: Join Session Table
+
+```python
+.outerjoin(
+    AttendanceSession,
+    AttendanceRecord.session_id ==
+    AttendanceSession.id,
+)
+```
+
+Purpose:
+
+```text
+Include session details even if
+session information is missing.
+```
+
+Equivalent SQL:
+
+```sql
+LEFT JOIN attendance_sessions
+ON attendance_records.session_id =
+attendance_sessions.id
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _apply_attendance_records_filters()</strong></summary>
+
+### Step 5: Apply Filters
+
+```python
+joined_q = _apply_attendance_records_filters(
+    joined_q,
+    date,
+    start_date,
+    end_date,
+    class_section,
+    student_class,
+    section,
+    session_id,
+)
+```
+
+Purpose:
+
+```text
+Apply user-selected filters to
+the main query.
+```
+
+Possible Filters:
+
+```text
+Date
+Date Range
+Class
+Section
+Class-Section
+Session ID
+```
+
+</details>
+
+---
+
+### Step 6: Sort Records
+
+```python
+joined_q = joined_q.order_by(
+    AttendanceRecord.date.desc(),
+    AttendanceRecord.time.desc()
+)
+```
+
+Sorting:
+
+```text
+Newest Date First
+      ↓
+Newest Time First
+```
+
+Example:
+
+```text
+2026-06-22 10:15 AM
+2026-06-22 09:45 AM
+2026-06-21 04:30 PM
+```
+
+Equivalent SQL:
+
+```sql
+ORDER BY
+date DESC,
+time DESC
+```
+
+---
+
+### Step 7: Apply Pagination
+
+```python
+if limit is not None:
+```
+
+When Pagination Requested:
+
+```python
+joined_q = joined_q.offset(skip).limit(limit)
+```
+
+Example:
+
+```text
+skip = 20
+limit = 10
+```
+
+Equivalent SQL:
+
+```sql
+OFFSET 20
+LIMIT 10
+```
+
+Result:
+
+```text
+Records 21-30
+```
+
+---
+
+### Step 8: Execute Query
+
+```python
+rows = joined_q.all()
+```
+
+Purpose:
+
+```text
+Run SQL query and fetch records.
+```
+
+Example Result:
+
+```python
+[
+    (
+        AttendanceRecord(...),
+        AttendanceSession(...)
+    )
+]
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _record_to_response()</strong></summary>
+
+### Step 9: Convert Database Rows
+
+```python
+[
+    _record_to_response(r, sess)
+    for r, sess in rows
+]
+```
+
+Purpose:
+
+```text
+Convert database objects into
+API response format.
+```
+
+Input:
+
+```python
+AttendanceRecord
+AttendanceSession
+```
+
+Output:
+
+```json
+{
+  "student_id": "STU001",
+  "student_name": "John",
+  "status": "Present",
+  "session_name": "Morning Attendance"
+}
+```
+
+</details>
+
+---
+
+### Step 10: Return Response
+
+```python
+return AttendanceListResponse(
+    records=[
+        _record_to_response(r, sess)
+        for r, sess in rows
+    ],
+    total=total,
+)
+```
+
+Example Response:
+
+```json
+{
+  "records": [
+    {
+      "student_id": "STU001",
+      "student_name": "John",
+      "status": "Present"
+    }
+  ],
+  "total": 250
+}
+```
+
+---
+
+### Flow
+
+```text
+GET /records
+        │
+        ▼
+Build Count Query
+        │
+        ▼
+Apply Filters
+        │
+        ▼
+COUNT(*)
+        │
+        ▼
+Build Main Query
+        │
+        ▼
+LEFT JOIN AttendanceSession
+        │
+        ▼
+Apply Filters
+        │
+        ▼
+ORDER BY Date/Time DESC
+        │
+        ▼
+Pagination
+(offset/limit)
+        │
+        ▼
+q.all()
+        │
+        ▼
+_record_to_response()
+        │
+        ▼
+AttendanceListResponse
+        │
+        ▼
+Return Response
+```
+
+</details>
+</details>
