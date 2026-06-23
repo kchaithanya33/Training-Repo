@@ -484,4 +484,98 @@ This class ensures full compatibility when sending responses back to MOSIP.
 
 </details>
 </details>
+<details><summary><b>Client</b></summary>
+BioChqClient Class
 
+## Overview
+
+This class is the **BioChq API Client**.  
+Its job is to send HTTP requests to BioChq ABIS and return responses.
+
+It acts as the **communication layer** between the MOSIP Wrapper and BioChq ABIS.
+
+---
+
+## Constructor & Setup
+
+### `__init__()`
+
+```python
+client = BioChqClient(
+    base_url="http://localhost:8000",
+    api_key="abc123"
+)
+```
+
+Stores: `base_url`, `api_key`, `timeout`, `max_retries` and creates an HTTP session.
+
+---
+
+### Key Helper Methods
+
+- **`_create_session()`** — Creates reusable session with automatic retries (429, 500, 502, 503, 504)
+- **`_get_headers()`** — Returns headers with `Content-Type` and `X-ABIS-Api-Key`
+- **`_response_snippet()`** — Helper for logging error messages
+
+---
+
+## BioChq Operations
+
+### 1. `insert()`
+- **Method:** `POST /api/metadata/insert/`
+- Enrolls biometric data
+- Input: `uId`, `bioType`, `image` (base64)
+- Output: `galleryId`, `status`
+
+### 2. `search()`
+- **Method:** `POST /api/metadata/search/`
+- Performs 1:N biometric search
+
+### 3. `identify()`
+- **Method:** `POST /api/metadata/identify/`
+- Identify using `uId`
+
+### 4. `status()`
+- **Method:** `POST /api/metadata/status/`
+- Check enrollment status
+
+### 5. `delete()`
+- **Method:** `DELETE /api/metadata/{galleryId}/`
+- Deletes enrolled record
+
+---
+
+## Admin Operations
+
+- **`health_check()`** — `GET /api/metadata/admin/health/`
+- **`processing_status()`** — Get pending jobs
+- **`stats()`** — Get database statistics
+
+---
+
+## Session Management
+
+- **`close()`** — Closes HTTP session
+- Supports Context Manager (`with` statement)
+
+---
+
+## Architecture Position
+
+```text
+MOSIP Request
+      ↓
+MOSIPToBioChqMapper
+      ↓
+BioChqClient
+      ↓
+BioChq ABIS API
+      ↓
+BioChqToMOSIPMapper
+      ↓
+MOSIP Response
+```
+
+**Role:** Handles all actual HTTP communication with BioChq.
+
+</details>
