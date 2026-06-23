@@ -1229,3 +1229,585 @@ Return JPEG Image
 
 </details>
 </details>
+
+<details>
+<summary><strong>API: GET /{student_id}/photos</strong></summary>
+
+# API: GET /{student_id}/photos
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+
+HTTP Method: GET
+
+Purpose:
+Returns all enrolled photos for a student.
+
+Supports both:
+
+• Multi-photo enrollment
+• Legacy single-photo enrollment
+
+Used by student profile screens
+and enrollment management pages.
+```
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Viewer, Operator, and Admin users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter  | Type | Required | Description        |
+| ---------- | ---- | -------- | ------------------ |
+| student_id | Path | Yes      | Student identifier |
+
+---
+
+### Request Example
+
+```text
+GET /students/STU001/photos
+```
+
+---
+
+### Step 1: Find Student
+
+```python
+student = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Verify student exists.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Query Student Photos
+
+```python
+rows = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id
+    )
+    .order_by(
+        StudentFaceImage.angle_index.asc()
+    )
+    .all()
+)
+```
+
+Purpose:
+
+```text
+Load all enrollment photos
+associated with the student.
+```
+
+Equivalent SQL:
+
+```sql
+SELECT *
+FROM student_face_images
+WHERE student_id='STU001'
+ORDER BY angle_index ASC;
+```
+
+---
+
+### Step 3: Check Multi-Photo Enrollment
+
+```python
+if rows:
+```
+
+Purpose:
+
+```text
+Determine whether student
+has photos stored in the
+student_face_images table.
+```
+
+Example:
+
+```text
+Angle 0
+Angle 1
+Angle 2
+```
+
+---
+
+### Step 4: Build Response Objects
+
+```python
+StudentPhotoItem(
+    angle_index=r.angle_index,
+    is_primary=bool(r.is_primary),
+    photo_url=f"/api/students/{student_id}/photos/{r.angle_index}"
+)
+```
+
+Purpose:
+
+```text
+Convert database records
+into API response objects.
+```
+
+Example Response Item:
+
+```json
+{
+  "angle_index": 0,
+  "is_primary": true,
+  "photo_url": "/api/students/STU001/photos/0"
+}
+```
+
+---
+
+### Step 5: Return Multi-Photo List
+
+Example Response:
+
+```json
+[
+  {
+    "angle_index": 0,
+    "is_primary": true,
+    "photo_url": "/api/students/STU001/photos/0"
+  },
+  {
+    "angle_index": 1,
+    "is_primary": false,
+    "photo_url": "/api/students/STU001/photos/1"
+  }
+]
+```
+
+---
+
+### Step 6: Legacy Fallback
+
+```python
+if student.minio_object_key:
+```
+
+Purpose:
+
+```text
+Support older enrollments
+that stored only a single image.
+```
+
+Example:
+
+```text
+students.minio_object_key
+```
+
+Build Response:
+
+```python
+StudentPhotoItem(
+    angle_index=0,
+    is_primary=True,
+    photo_url=f"/api/students/{student_id}/photo"
+)
+```
+
+Example Response:
+
+```json
+[
+  {
+    "angle_index": 0,
+    "is_primary": true,
+    "photo_url": "/api/students/STU001/photo"
+  }
+]
+```
+
+---
+
+### Step 7: No Photos Available
+
+```python
+return []
+```
+
+Purpose:
+
+```text
+Return empty list when
+student has no stored photos.
+```
+
+Example Response:
+
+```json
+[]
+```
+
+---
+
+### Flow
+
+```text
+GET /{student_id}/photos
+            │
+            ▼
+Find Student
+            │
+            ├── Not Found → 404
+            │
+            ▼
+Query StudentFaceImage
+            │
+            ▼
+Photos Found?
+            │
+     ┌──────┴──────┐
+     │             │
+    YES            NO
+     │             │
+     ▼             ▼
+Build        Legacy Photo?
+Photo List         │
+     │        ┌────┴────┐
+     │        │         │
+     │       YES        NO
+     │        │         │
+     ▼        ▼         ▼
+Return    Return     Return
+Photos    Legacy       []
+           Photo
+```
+
+</details>
+</details>
+
+<details>
+<summary><strong>API: GET /{student_id}/photos/{angle_index}</strong></summary>
+
+# API: GET /{student_id}/photos/{angle_index}
+
+## Operation Type
+
+```text
+CRUD Operation: READ
+
+HTTP Method: GET
+
+Purpose:
+Returns a specific enrolled
+student photo based on angle.
+
+Used for viewing enrollment
+images captured from different
+camera positions.
+```
+
+### Authentication
+
+```python
+_user = RequireViewer
+```
+
+Viewer, Operator, and Admin users can access this API.
+
+---
+
+### Request Parameters
+
+| Parameter   | Type | Required | Description        |
+| ----------- | ---- | -------- | ------------------ |
+| student_id  | Path | Yes      | Student identifier |
+| angle_index | Path | Yes      | Photo angle index  |
+
+---
+
+### Request Example
+
+```text
+GET /students/STU001/photos/1
+```
+
+---
+
+### Step 1: Find Student
+
+```python
+student = (
+    db.query(Student)
+    .filter(
+        Student.student_id == student_id
+    )
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Verify student exists.
+```
+
+Student Found?
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Student not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+#### YES
+
+Continue.
+
+---
+
+### Step 2: Find Requested Photo
+
+```python
+row = (
+    db.query(StudentFaceImage)
+    .filter(
+        StudentFaceImage.student_id
+        == student_id,
+
+        StudentFaceImage.angle_index
+        == angle_index
+    )
+    .first()
+)
+```
+
+Purpose:
+
+```text
+Locate the requested
+photo angle.
+```
+
+Example:
+
+```text
+Angle 0 → Front
+Angle 1 → Left
+Angle 2 → Right
+```
+
+---
+
+### Step 3: Verify Photo Exists
+
+```python
+if not row:
+```
+
+Return:
+
+```json
+{
+  "detail": "Photo not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+---
+
+### Step 4: Load Storage Service
+
+```python
+storage_svc =
+get_storage_service()
+```
+
+Purpose:
+
+```text
+Access object storage.
+```
+
+---
+
+### Step 5: Download Image
+
+```python
+data =
+storage_svc.download_image(
+    row.minio_object_key
+)
+```
+
+Purpose:
+
+```text
+Retrieve image bytes
+from object storage.
+```
+
+Example:
+
+```text
+III-F/STU001_angle1.jpg
+```
+
+---
+
+### Step 6: Handle Storage Errors
+
+```python
+except Exception as e:
+```
+
+Log Error:
+
+```python
+logger.warning(...)
+```
+
+Example Log:
+
+```text
+Failed to load photo angle 1
+for STU001
+```
+
+Return:
+
+```json
+{
+  "detail": "Photo not available"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+Possible Causes:
+
+```text
+Image deleted
+Invalid object key
+Storage unavailable
+Corrupted file
+```
+
+---
+
+### Step 7: Return Image
+
+```python
+return Response(
+    content=data,
+    media_type="image/jpeg"
+)
+```
+
+Purpose:
+
+```text
+Return image bytes
+to the browser/UI.
+```
+
+Response Type:
+
+```text
+image/jpeg
+```
+
+---
+
+### Flow
+
+```text
+GET /{student_id}/photos/{angle_index}
+                 │
+                 ▼
+Find Student
+                 │
+                 ├── Not Found → 404
+                 │
+                 ▼
+Find Photo Angle
+                 │
+                 ├── Not Found → 404
+                 │
+                 ▼
+Load Storage Service
+                 │
+                 ▼
+Download Image
+                 │
+                 ├── Error → 404
+                 │
+                 ▼
+Return JPEG Image
+```
+
+</details>
+</details>
