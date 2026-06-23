@@ -4233,3 +4233,492 @@ Return Response
 
 </details>
 </details>
+
+<details>
+<summary><strong>API: POST /unknown/resolve</strong></summary>
+
+# API: POST /unknown/resolve
+
+## Operation Type
+
+```text
+CRUD Operation: UPDATE
+
+HTTP Method: POST
+
+Purpose:
+Resolves an unknown detected face by
+linking it to an existing student.
+
+The unknown face is converted into a
+known student attendance record.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Request Example
+
+```json
+{
+  "session_id": "6c8a4f10-2d5b-4c5e-b4b8-123456789abc",
+  "class_section": "III-F",
+  "unknown_id": "UNK_001",
+  "student_id": "STU001",
+  "result_id": "RES_123"
+}
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _validate_session_scope()</strong></summary>
+
+### Step 1: Validate Session
+
+```python
+sess = _validate_session_scope(
+    db,
+    body.session_id,
+    body.class_section
+)
+```
+
+Purpose:
+
+```text
+Verify that:
+
+• Session exists
+• Session is active
+• Session belongs to the specified
+  class-section
+```
+
+Example:
+
+```text
+Session:
+Morning Attendance
+
+Class:
+III-F
+```
+
+### Validation Failed?
+
+Return:
+
+```json
+{
+  "detail": "Invalid session scope"
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+</details>
+
+---
+
+### Step 2: Generate Session Class-Section
+
+```python
+milvus_cs = _class_section_combined(
+    sess.student_class,
+    sess.section
+)
+```
+
+Example:
+
+```python
+student_class = "III"
+section = "F"
+```
+
+Result:
+
+```text
+III-F
+```
+
+---
+
+### Step 3: Verify Class Section Match
+
+```python
+if milvus_cs != body.class_section.strip():
+```
+
+Purpose:
+
+```text
+Ensure request class_section
+matches the active session.
+```
+
+Example:
+
+```text
+Session:
+III-F
+
+Request:
+IV-A
+```
+
+Mismatch Found:
+
+```json
+{
+  "detail": "class_section does not match active session"
+}
+```
+
+HTTP Status:
+
+```text
+400 Bad Request
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _resolve_unknown_face_impl()</strong></summary>
+
+### Step 4: Resolve Unknown Face
+
+```python
+return _resolve_unknown_face_impl(
+    db,
+    sess,
+    unknown_id=body.unknown_id.strip(),
+    student_id=body.student_id.strip(),
+    result_id=(body.result_id or "").strip() or None,
+)
+```
+
+Purpose:
+
+```text
+Convert an unknown face into
+a recognized student.
+```
+
+Input:
+
+```python
+unknown_id
+student_id
+result_id
+```
+
+Example:
+
+```text
+Unknown Face:
+UNK_001
+
+Mapped To:
+STU001
+```
+
+Possible Operations:
+
+```text
+• Locate unknown face record
+• Validate student exists
+• Update attendance result
+• Mark face as resolved
+• Link student identity
+```
+
+Example Outcome:
+
+```text
+UNK_001
+      ↓
+STU001
+```
+
+</details>
+
+---
+
+### Step 5: Return Response
+
+```python
+UnknownFaceResolveResponse
+```
+
+Example Response:
+
+```json
+{
+  "unknown_id": "UNK_001",
+  "student_id": "STU001",
+  "status": "resolved"
+}
+```
+
+---
+
+### Flow
+
+```text
+POST /unknown/resolve
+        │
+        ▼
+Validate Session Scope
+        │
+        ▼
+Generate Class-Section
+        │
+        ▼
+Verify Class-Section Match
+        │
+        ├── NO → 400 Error
+        │
+        ▼
+_resolve_unknown_face_impl()
+        │
+        ▼
+Link Unknown Face
+To Existing Student
+        │
+        ▼
+Return Response
+```
+
+</details>
+</details>
+
+<details>
+<summary><strong>API: POST /unknown/enroll-new</strong></summary>
+
+# API: POST /unknown/enroll-new
+
+## Operation Type
+
+```text
+CRUD Operation: CREATE
+
+HTTP Method: POST
+
+Purpose:
+Creates a brand-new student from
+an unknown face detected during
+attendance processing.
+
+The enrollment worker later processes
+the staged face crop and creates
+the student's facial embeddings.
+```
+
+### Authentication
+
+```python
+_user = RequireOperator
+```
+
+Only Operator users can access this API.
+
+---
+
+### Request Example
+
+```json
+{
+  "session_id": "6c8a4f10-2d5b-4c5e-b4b8-123456789abc",
+  "unknown_id": "UNK_001",
+  "name": "Rahul Sharma",
+  "class_section": "III-F",
+  "student_id": "STU101",
+  "result_id": "RES_123"
+}
+```
+
+---
+
+<details>
+<summary><strong>Internal Function: _get_session_or_404()</strong></summary>
+
+### Step 1: Get Session
+
+```python
+sess = _get_session_or_404(
+    db,
+    body.session_id.strip()
+)
+```
+
+Purpose:
+
+```text
+Retrieve attendance session
+from database.
+```
+
+### Session Exists?
+
+#### YES
+
+Continue.
+
+#### NO
+
+Return:
+
+```json
+{
+  "detail": "Session not found"
+}
+```
+
+HTTP Status:
+
+```text
+404 Not Found
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>Internal Function: _enroll_unknown_face_new_impl()</strong></summary>
+
+### Step 2: Enroll Unknown Face As New Student
+
+```python
+return _enroll_unknown_face_new_impl(
+    db,
+    sess,
+    unknown_id=body.unknown_id.strip(),
+    name=body.name,
+    class_section=body.class_section.strip(),
+    student_id=(body.student_id or "").strip() or None,
+    result_id=(body.result_id or "").strip() or None,
+)
+```
+
+Purpose:
+
+```text
+Create a new student using the
+unknown face captured during
+attendance.
+```
+
+Input:
+
+```python
+unknown_id
+name
+class_section
+student_id
+result_id
+```
+
+Example:
+
+```text
+Unknown Face:
+UNK_001
+
+Student Name:
+Rahul Sharma
+
+Class:
+III-F
+```
+
+Possible Internal Operations:
+
+```text
+• Validate unknown face exists
+• Create new student record
+• Store enrollment request
+• Stage cropped face image
+• Queue enrollment worker
+• Generate face embeddings later
+```
+
+Example:
+
+```text
+UNK_001
+      ↓
+Create Student
+      ↓
+STU101
+```
+
+</details>
+
+---
+
+### Step 3: Return Response
+
+```python
+StudentResponse
+```
+
+Example Response:
+
+```json
+{
+  "student_id": "STU101",
+  "name": "Rahul Sharma",
+  "student_class": "III",
+  "section": "F"
+}
+```
+
+---
+
+### Flow
+
+```text
+POST /unknown/enroll-new
+        │
+        ▼
+Get Session
+        │
+        ├── Not Found → 404 Error
+        │
+        ▼
+_enroll_unknown_face_new_impl()
+        │
+        ▼
+Validate Unknown Face
+        │
+        ▼
+Create Student Record
+        │
+        ▼
+Stage Face Crop
+        │
+        ▼
+Queue Enrollment Worker
+        │
+        ▼
+Generate Embeddings Later
+        │
+        ▼
+Return StudentResponse
+```
+
+</details>
