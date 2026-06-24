@@ -579,3 +579,268 @@ MOSIP Response
 **Role:** Handles all actual HTTP communication with BioChq.
 
 </details>
+
+</details>
+
+
+<details><summary>View</summary>
+
+<details>
+<summary><strong>insert() Function Flow</strong></summary>
+
+### Purpose
+
+Acts as the API entry point for MOSIP Insert requests.
+
+### Code
+
+```python
+@api_view(["POST"])
+@require_mosip_auth
+def insert(request):
+    response_payload, status_code = _handle_insert_payload(
+        request.data,
+        getattr(request, "mosip_token", None)
+    )
+    return Response(response_payload, status=status_code)
+```
+
+### Flow
+
+```text
+MOSIP Request
+      ↓
+Authentication Check
+      ↓
+Read request.data
+      ↓
+Read mosip_token
+      ↓
+Call _handle_insert_payload()
+      ↓
+Receive:
+    response_payload
+    status_code
+      ↓
+Return HTTP Response
+```
+
+### Responsibility
+
+- Receive request from MOSIP
+- Verify authentication
+- Pass payload to business logic layer
+- Return final response
+
+---
+
+<details>
+<summary><strong>_handle_insert_payload() Function Flow</strong></summary>
+
+### 1. Read Request Data
+
+Extract:
+
+- requestId
+- referenceId
+- referenceURL
+- requesttime
+- id
+- version
+
+---
+
+### 2. Validate Request
+
+Checks:
+
+- Validate operation id (`mosip.abis.insert`)
+- Validate requesttime
+- Validate referenceId
+- Validate referenceURL
+- Validate version
+- Reject unknown fields
+
+---
+
+### 3. Create Request Record
+
+```python
+_create_request_record("insert", payload)
+```
+
+Stores request metadata in the database.
+
+---
+
+### 4. Check Duplicate ReferenceId
+
+```text
+referenceId already exists?
+        │
+   Yes ─┴─→ failureReason = 10
+        │
+       No
+```
+
+---
+
+### 5. Download and Extract Biometrics
+
+```python
+_extract_biometrics(payload, token)
+```
+
+Responsibilities:
+
+- Download CBEFF XML
+- Decrypt data
+- Parse XML
+- Extract biometric records
+
+---
+
+### 6. Handle Extraction Errors
+
+| Scenario | failureReason |
+|-----------|--------------|
+| Download failure | 7 |
+| Decryption failure | 11 |
+| Expired URL | 17 |
+| Invalid XML/CBEFF | 16 |
+| No biometric data | 11 |
+
+---
+
+### 7. Validate Biometric Data
+
+Checks:
+
+- Data exists
+- Valid biometric type
+- Valid format
+- Base64 decoding
+- Data integrity
+- Not corrupted
+
+---
+
+### 8. Face / Iris Validation
+
+#### Face
+
+```python
+DeepFace
+```
+
+Validate face image.
+
+#### Iris
+
+```python
+OpenIris
+```
+
+Validate iris image.
+
+---
+
+### 9. MOSIP → BioChq Mapping
+
+```python
+MOSIPToBioChqMapper.map_insert_request()
+```
+
+Converts MOSIP biometric format into BioChq enrollment format.
+
+---
+
+### 10. Call BioChq Insert API
+
+```python
+biochq_client.insert()
+```
+
+Returns:
+
+- galleryId
+- status
+- qualityScore
+
+---
+
+### 11. Wait Until STORED
+
+```python
+biochq_client.status()
+```
+
+Poll until:
+
+```text
+STORED
+```
+
+or
+
+```text
+COMPLETED
+```
+
+---
+
+### 12. Save Mapping
+
+```python
+_record_mapping()
+```
+
+Stores:
+
+```text
+referenceId
+      ↕
+   galleryId
+```
+
+Used later by:
+
+- Delete API
+- Identify API
+- Status API
+
+---
+
+### 13. Mark Request Completed
+
+```python
+mosip_request.mark_completed()
+```
+
+---
+
+### 14. BioChq → MOSIP Mapping
+
+```python
+BioChqToMOSIPMapper.map_insert_response()
+```
+
+Converts BioChq response into MOSIP response.
+
+---
+
+### 15. Return Success Response
+
+```json
+{
+  "id": "mosip.abis.insert",
+  "requestId": "...",
+  "returnValue": "1"
+}
+```
+
+</details>
+
+</details>
+   
+</details>
