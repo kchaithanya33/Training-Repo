@@ -586,7 +586,7 @@ MOSIP Response
 <details><summary>View</summary>
 
 <details>
-<summary><strong>insert() Function Flow</strong></summary>
+<summary><strong>insert()</strong></summary>
 
 ### Purpose
 
@@ -843,4 +843,116 @@ Converts BioChq response into MOSIP response.
 
 </details>
    
+   <details><summary>identify()</summary>
+   # Identify API (`mosip.abis.identify`)
+
+## Purpose
+
+The Identify API performs biometric identification.
+
+It receives biometric data from MOSIP, sends it to BioChq ABIS for matching, and returns matching candidates in MOSIP format.
+
+## Entry Point
+
+```python
+@api_view(["POST"])
+@require_mosip_auth
+def identify(request):
+
+    response_payload, status_code = _handle_identify_payload(
+        request.data,
+        getattr(request, "mosip_token", None)
+    )
+
+    return Response(
+        response_payload,
+        status=status_code
+    )
+```
+
+The main processing is handled by `_handle_identify_payload()`.
+
+## Identify Processing Flow
+
+MOSIP Identify Request  
+→ Identify API  
+→ Validate MOSIP Authentication  
+→ Extract Request Data  
+→ Validate Request Fields  
+→ Create Request Record  
+→ Process Gallery Filter  
+→ Extract Biometric Data  
+→ Check Reference Mapping  
+→ Convert MOSIP Data to BioChq Format  
+→ Call BioChq ABIS (Search / Identify)  
+→ Process Matching Results  
+→ Convert BioChq Response to MOSIP Format  
+→ Return Candidate List
+
+## Main Business Logic Function: `_handle_identify_payload(payload, token)`
+
+### 1. Extract Request Information
+- `requestId`, `referenceId`, `requesttime`, `version`, `flags`, `gallery`, `biometricData`
+
+### 2. Validate Request
+- API ID must be `mosip.abis.identify`
+- Validates `requesttime` format
+- Checks required fields
+- Rejects unknown fields
+
+### 3. Create Request Record
+- `_create_request_record("identify", payload)`
+
+### 4. Process Gallery Filter
+- Validates reference IDs using database mapping
+- Returns `ABIS3028` if no valid gallery
+
+### 5. Extract Biometrics
+- `_extract_biometrics(payload, token)`
+- Decodes CBEFF and extracts biometric records
+
+### 6. Reference Mapping
+- Maps `referenceId` → `galleryId` using `ReferenceMapping` table
+
+### 7. Determine Matching Threshold
+- Uses `targetFPIR` or default
+
+### 8. MOSIP → BioChq Mapping
+- `MOSIPToBioChqMapper.map_identify_request()`
+
+### 9. Call BioChq API
+- `biochq_client.search()` if biometric data present
+- `biochq_client.identify()` if only referenceId
+
+### 10. Process BioChq Response
+- Convert IDs back
+- Remove self-match
+- Apply filters & threshold
+- Remove duplicates
+- Sort by similarity
+
+### 11. BioChq → MOSIP Mapping
+- `BioChqToMOSIPMapper.map_identify_response()`
+
+### 12. Update Request Status
+- Mark as completed or failed
+
+## Final Response Example
+
+```json
+{
+  "id": "mosip.abis.identify",
+  "requestId": "12345",
+  "returnValue": "1",
+  "candidateList": [
+    {
+      "referenceId": "USER002",
+      "analytics": { ... }
+    }
+  ]
+}
+```
+
+This API is the core of 1:N biometric identification in the MOSIP Wrapper.
+</details>
 </details>
