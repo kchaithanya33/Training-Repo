@@ -955,4 +955,234 @@ MOSIP Identify Request
 
 This API is the core of 1:N biometric identification in the MOSIP Wrapper.
 </details>
+<details><summary><b>Delete</b></summary>
+
+The **Delete API** removes biometric data from BioChq ABIS using a MOSIP `referenceId`.
+
+It deletes the biometric records and cleans up local mappings.
+
+---
+
+## Entry Point
+
+```python
+@api_view(["DELETE"])
+def delete(request):
+    response_payload, status_code = _handle_delete_payload(request.data)
+    return Response(response_payload, status=status_code)
+```
+
+Main logic is in `_handle_delete_payload()`.
+
+---
+
+## Processing Flow
+
+1. **Extract identifiers**
+   - `requestId`
+   - `referenceId`
+
+2. **Validate `referenceId`**
+   - Return 400 if missing
+
+3. **Create request record**
+   - Track the delete operation
+
+4. **Find mappings**
+   - Query `ReferenceMapping` table for `galleryId`s
+
+5. **Delete from BioChq**
+   - Call `biochq_client.delete()` for each galleryId
+
+6. **Clean local mappings**
+   - Remove entries from database
+
+7. **Map response**
+   - Use `BioChqToMOSIPMapper.map_delete_response()`
+
+8. **Return MOSIP response**
+
+---
+
+## Success Response Example
+
+```json
+{
+  "id": "mosip.abis.delete",
+  "requestId": "12345",
+  "returnValue": "1"
+}
+```
+
+---
+
+## Error Handling
+
+- **No referenceId** → 400 Bad Request
+- **No mappings found** → 404 Not Found
+- **BioChq failure** → 503 Service Unavailable
+- **Other errors** → 500 Internal Server Error
+
+---
+
+**Summary:**  
+MOSIP → referenceId → Find galleryIds → Delete from BioChq → Clean mappings → Success response to MOSIP.
+</details>
+<details>
+   <summary>pending_jobs()</summary>
+   
+The `pending_jobs()` API checks how many biometric operations are still **pending** or **processing** in the system.
+
+---
+
+## Flow
+
+### 1. Extract Request ID
+```python
+request_id = request.query_params.get("requestId", "unknown")
+```
+
+Example:  
+`GET /pendingJobs?requestId=123`
+
+### 2. Get BioChq Processing Status
+```python
+biochq_response = biochq_client.processing_status()
+```
+
+Returns status from BioChq ABIS:
+```json
+{
+  "processing_status": {
+    "NEW": 5,
+    "PENDING": 3,
+    "PROCESSING": 2
+  }
+}
+```
+
+### 3. Count Remote Pending Jobs
+```python
+remote_pending = NEW + PENDING + PROCESSING
+# Example: 5 + 3 + 2 = 10
+```
+
+### 4. Count Local Pending Requests
+```python
+local_pending = MOSIPRequest.objects.filter(
+    status__in=["NEW", "PROCESSING"]
+).count()
+```
+
+### 5. Calculate Total Pending
+```python
+total_pending = local_pending + remote_pending
+```
+
+### 6. Return MOSIP Response
+```json
+{
+  "id": "mosip.abis.pendingJobs",
+  "jobscount": "12",
+  "returnValue": "1"
+}
+```
+
+---
+
+## Summary
+
+This API provides a combined view of pending jobs:
+- **Local** (MOSIP Wrapper database)
+- **Remote** (BioChq ABIS)
+
+Helps monitor system load and backlog.
+
+</details>
+
+<details>
+   <summary><b>reference_count()</b></summary>
+
+
+## 1. reference_count() API
+
+### Purpose
+Returns the total number of biometric references stored in the ABIS.
+
+### Flow
+
+1. **Extract Request ID**
+   ```python
+   request_id = request.query_params.get("requestId")
+   ```
+
+2. **Get BioChq Statistics**
+   ```python
+   biochq_response = biochq_client.stats()
+   ```
+
+3. **Count Records**
+   - Remote count from BioChq (`total_records`)
+   - Local count from `ReferenceMapping` table (distinct `reference_id`)
+
+4. **Final Count**
+   ```python
+   total_count = max(remote_count, local_count)
+   ```
+
+### Response Example
+```json
+{
+  "id": "mosip.abis.referenceCount",
+  "count": "5000",
+  "returnValue": "1"
+}
+```
+
+---
+## API: request_status() API
+
+### Purpose
+Gets the current status and details of a specific MOSIP request.
+
+Example endpoint:  
+`GET /requestStatus/REQ123`
+
+### Flow
+
+1. **Find Request in Database**
+   ```python
+   mosip_request = MOSIPRequest.objects.get(request_id=request_id)
+   ```
+
+   - Returns 404 if not found.
+
+2. **Build Response**
+   Returns full request details including:
+   - `requestId`
+   - `referenceId`
+   - `operation`
+   - `status`
+   - `failureReason`
+   - Timestamps (`created_at`, `updated_at`, `completed_at`)
+   - `biochq_response`
+
+### Response Example
+```json
+{
+  "requestId": "REQ123",
+  "referenceId": "USER001",
+  "operation": "INSERT",
+  "status": "COMPLETED",
+  "failureReason": null,
+  "biochq_response": {
+    "galleryId": "BIO123"
+  }
+}
+```
+
+---
+
+**Summary**: These admin APIs help monitor ABIS statistics and track individual request status.
+</details>
 </details>
