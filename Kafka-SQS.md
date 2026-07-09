@@ -208,7 +208,7 @@ GO
     "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
     "tasks.max": "1",
 
-    "database.hostname": "sqlserver-db",
+    "database.hostname": "host.docker.internal",
     "database.port": "1433",
     "database.user": "cdc_user",
     "database.password": "StrongPass@123",
