@@ -26,6 +26,130 @@ This guide provides a complete step-by-step setup for Oracle Change Data Capture
 - SQL Developer
 - Docker environment for Debezium
 
+# Oracle Debezium Docker Setup Guide
+
+This document contains the complete **Docker Compose** and **Dockerfile** configuration for running Debezium with Oracle CDC support, including Kafka, Zookeeper, Kafka Connect, and Kafdrop.
+
+## 1. Dockerfile (for Oracle)
+
+```dockerfile
+FROM quay.io/debezium/connect:2.5
+
+USER root
+
+# Oracle JDBC Driver
+COPY ojdbc11.jar /usr/share/java/ojdbc11.jar
+
+# Camel AWS SQS connector
+RUN mkdir -p /usr/share/confluent-hub-components/camel-aws2-sqs
+
+RUN curl -L -o /tmp/camel-sqs.tar.gz \
+  https://repo1.maven.org/maven2/org/apache/camel/kafkaconnector/camel-aws2-sqs-kafka-connector/0.11.0/camel-aws2-sqs-kafka-connector-0.11.0-package.tar.gz
+
+RUN tar -xvzf /tmp/camel-sqs.tar.gz \
+  -C /usr/share/confluent-hub-components/camel-aws2-sqs
+
+RUN rm /tmp/camel-sqs.tar.gz
+
+USER 1001
+```
+
+### Important Notes
+- Download `ojdbc11.jar` from: [Oracle JDBC Downloads](https://www.oracle.com/database/technologies/appdev/jdbc-downloads.html)
+- Place `ojdbc11.jar` in the same directory as the Dockerfile before building.
+
+
+## 2. docker-compose.yml
+
+```yaml
+version: '3.8'
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  connect:
+    build: .
+    container_name: connect
+    depends_on:
+      - kafka
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: connect-group
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      PLUGIN_PATH: /kafka/connect
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    container_name: kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: kafka:9092
+
+volumes:
+  kafka_data:
+```
+
+## How to Run
+
+1. Place `ojdbc11.jar` next to the Dockerfile.
+2. Build the custom Connect image:
+   ```bash
+   docker build -t debezium-connect-oracle:2.5 .
+   ```
+3. Start the services:
+   ```bash
+   docker compose up -d
+   ```
+4. Verify containers:
+   ```bash
+   docker ps
+   ```
+5. Access Kafdrop UI: http://localhost:9000
+6. Check connectors: http://localhost:8083/connector-plugins
+
+---
+
+## Oracle CDC with Debezium Setup Guide
+
 ## Step 1: Open SQL Developer and Create SYS Connection
 
 | Field       | Value      |
