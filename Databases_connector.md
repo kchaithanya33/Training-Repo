@@ -270,4 +270,3 @@ Look for: `io.debezium.connector.oracle.OracleConnector`
 
 ---
 
-**Note:** Adjust passwords and hostnames as needed for your environment. Always test connections and permissions thoroughly.
