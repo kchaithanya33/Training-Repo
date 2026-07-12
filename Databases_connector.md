@@ -394,3 +394,356 @@ Look for: `io.debezium.connector.oracle.OracleConnector`
 
 ---
 
+
+# PostgreSQL → Debezium → Kafka CDC Setup
+
+PostgreSQL is an open-source Relational Database Management System (RDBMS).
+
+## Step 1: Enable Logical Replication
+
+Open:
+
+`C:\Program Files\PostgreSQL\17\data\postgresql.conf`
+
+Find:
+
+```conf
+#wal_level = replica
+```
+
+Change to:
+
+```conf
+wal_level = logical
+```
+
+Add:
+
+```conf
+max_replication_slots = 10
+max_wal_senders = 10
+```
+
+Save the file.
+
+### Why wal_level should be logical?
+
+PostgreSQL stores database changes in WAL.
+
+**WAL** means: **Write Ahead Log**
+
+**Example:**
+
+When we run:
+
+```sql
+UPDATE employee
+SET department='DevOps'
+WHERE id=3;
+```
+
+PostgreSQL writes:
+
+**WAL Entry:**
+
+- Old value: Security
+- New value: DevOps
+
+By default: `wal_level = replica` supports only **physical replication**.
+
+**Example:**
+
+Primary Database → Replica Database
+
+But Debezium needs **row-level changes**:
+
+**Before:** Security  
+**After:** DevOps
+
+Therefore, `wal_level = logical` is required.
+
+Logical replication converts WAL changes into a format Debezium understands.
+
+### Why max_replication_slots?
+
+Replication slots remember how much WAL Debezium consumed.
+
+**Example:**
+
+WAL: 1 2 3 4 5 6
+
+Debezium consumed till 4
+
+PostgreSQL will keep remaining WAL until Debezium reads it.
+
+### Why max_wal_senders?
+
+Allows PostgreSQL to create replication connections.
+
+**Example:**
+
+PostgreSQL  
+├── Debezium  
+└── Other Replicas
+
+## Step 2: Restart PostgreSQL service
+
+Open PowerShell as Administrator:
+
+```powershell
+net stop postgresql-x64-17
+```
+
+Then:
+
+```powershell
+net start postgresql-x64-17
+```
+
+## Step 3: Verify WAL settings
+
+In pgAdmin Query Tool:
+
+Run:
+
+```sql
+SHOW wal_level;
+```
+
+**Output:** `logical`
+
+Check:
+
+```sql
+SHOW max_replication_slots;
+```
+
+**Output:** `10`
+
+## Step 4: Create Debezium user
+
+Run as postgres user:
+
+```sql
+CREATE USER debezium
+WITH PASSWORD 'debezium'
+REPLICATION;
+```
+
+### Why create Debezium user?
+
+Debezium needs a PostgreSQL account to connect.
+
+The user answers: **WHO** can connect to PostgreSQL?
+
+**Example:**
+
+Debezium Connector → username/password → PostgreSQL
+
+The user `debezium` is used in connector configuration:
+
+`"database.user":"debezium"`
+
+## Step 5: Give permissions to Debezium user
+
+Run:
+
+```sql
+GRANT CONNECT ON DATABASE postgres TO debezium;
+
+GRANT CREATE ON DATABASE postgres TO debezium;
+
+GRANT USAGE ON SCHEMA public TO debezium;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO debezium;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT ON TABLES TO debezium;
+```
+
+- `GRANT CONNECT` - Allows database connection.
+- `GRANT CREATE` - Allows required database operations.
+- `GRANT USAGE` - Allows access to schema.
+- `GRANT SELECT` - Allows reading tables.
+- `ALTER DEFAULT PRIVILEGES` - Automatically gives permission for future tables.
+
+## Step 6: Create sample table
+
+```sql
+CREATE TABLE employee
+(
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    department VARCHAR(100)
+);
+
+INSERT INTO employee(name,department)
+VALUES
+('John','IT'),
+('Mary','HR');
+```
+
+## Step 7: Enable old value capture for UPDATE
+
+```sql
+ALTER TABLE employee REPLICA IDENTITY FULL;
+```
+
+### Why REPLICA IDENTITY FULL?
+
+By default PostgreSQL sends only changed values.
+
+**Without:**
+
+```json
+{
+  "before": null,
+  "after": {
+    "department": "DevOps"
+  }
+}
+```
+
+**With:**
+
+```json
+{
+  "before": {
+    "department": "Security"
+  },
+  "after": {
+    "department": "DevOps"
+  }
+}
+```
+
+This allows Debezium to send complete **before {}** and **after {}** records.
+
+## Step 8: Create Debezium publication
+
+Run as postgres:
+
+```sql
+CREATE PUBLICATION debezium_pub
+FOR TABLE public.employee;
+```
+
+Verify:
+
+```sql
+SELECT * FROM pg_publication_tables;
+```
+
+**Output:**
+
+| pubname       | schemaname | tablename |
+|---------------|------------|-----------|
+| debezium_pub  | public     | employee  |
+
+### Why create publication?
+
+Publication decides: **WHAT DATA SHOULD BE CAPTURED?**
+
+**Example database:**
+
+- employee
+- customer
+- orders
+
+**Publication:** `debezium_pub` → ONLY employee
+
+Debezium reads changes from this publication.
+
+### Difference between Debezium User and Publication
+
+| Component       | Purpose                  |
+|-----------------|--------------------------|
+| debezium user   | Who can connect          |
+| debezium_pub    | What tables can be captured |
+
+**Example:**
+
+- User `debezium` = Employee ID card
+- Publication `debezium_pub` = Permission list
+
+Both are required.
+
+## Step 9: Verify Kafka Connect is running
+
+```bash
+docker ps
+```
+
+Running containers: `kafka`, `connect`, `zookeeper`
+
+## Step 10: Verify Debezium PostgreSQL plugin
+
+```bash
+curl http://localhost:8083/connector-plugins
+```
+
+Check for: `io.debezium.connector.postgresql.PostgresConnector`
+
+## Step 11: Create Debezium connector JSON
+
+**File:** `postgres-cdc.json`
+
+```json
+{
+  "name": "postgres-cdc-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "host.docker.internal",
+    "database.port": "5433",
+    "database.user": "debezium",
+    "database.password": "debezium",
+    "database.dbname": "postgres",
+
+    "topic.prefix": "postgres",
+
+    "plugin.name": "pgoutput",
+
+    "slot.name": "debezium_slot",
+    "publication.name": "debezium_pub",
+    "publication.autocreate.mode": "disabled",
+
+    "table.include.list": "public.employee",
+
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.postgres"
+  }
+}
+```
+
+## Step 14: Create connector
+
+```bash
+http://localhost:8083/connectors
+```
+
+**Response:** `201 Created`
+
+### Check connector status
+
+```bash
+curl http://localhost:8083/connectors/postgres-cdc-connector/status
+```
+
+**Successful output:**
+
+```json
+{
+  "connector": {
+    "state": "RUNNING"
+  },
+  "tasks": [
+    {
+      "state": "RUNNING"
+    }
+  ]
+}
+```
+
+
