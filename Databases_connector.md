@@ -745,5 +745,307 @@ curl http://localhost:8083/connectors/postgres-cdc-connector/status
   ]
 }
 ```
+---
+
+
+# SQLite CDC to Kafka Setup Guide
+
+This guide explains how to implement Change Data Capture (CDC) for SQLite and stream changes to Kafka using triggers and a custom Python producer.
+
+## Step 1: Download SQLite
+Download and extract SQLite to:
+`C:\Users\Chaitanya\Downloads\sqlite`
+
+## Step 2: Open Database
+```bash
+cd C:\Users\Chaitanya\Downloads\sqlite
+.\sqlite3.exe employee.db
+```
+
+Verify:
+```sql
+.databases
+```
+
+## Step 3: Create Employee Table
+```sql
+CREATE TABLE employee(
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    salary INTEGER,
+    modified_by TEXT
+);
+```
+
+> **Note**: We add `modified_by` because the application knows who is logged in.
+
+## Step 4: Create CDC Table
+```sql
+CREATE TABLE employee_changes(
+    cdc_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER,
+    operation TEXT,
+    changed_by TEXT,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## Step 5: Create Offset Table
+```sql
+CREATE TABLE producer_offset(
+    last_cdc_id INTEGER
+);
+
+INSERT INTO producer_offset VALUES (0);
+```
+
+## Step 6: Create Triggers
+
+### INSERT Trigger
+```sql
+CREATE TRIGGER employee_insert
+AFTER INSERT ON employee
+BEGIN
+    INSERT INTO employee_changes(employee_id, operation, changed_by)
+    VALUES(NEW.id, 'INSERT', NEW.modified_by);
+END;
+```
+
+### UPDATE Trigger
+```sql
+CREATE TRIGGER employee_update
+AFTER UPDATE ON employee
+BEGIN
+    INSERT INTO employee_changes(employee_id, operation, changed_by)
+    VALUES(NEW.id, 'UPDATE', NEW.modified_by);
+END;
+```
+
+### DELETE Trigger
+```sql
+CREATE TRIGGER employee_delete
+AFTER DELETE ON employee
+BEGIN
+    INSERT INTO employee_changes(employee_id, operation, changed_by)
+    VALUES(OLD.id, 'DELETE', OLD.modified_by);
+END;
+```
+
+## Step 7: Verify Tables
+```sql
+.tables
+```
+
+**Expected Output:**
+```
+employee
+employee_changes
+producer_offset
+```
+
+## Step 8: Insert Sample Data
+```sql
+INSERT INTO employee VALUES(1, 'John', 50000, 'chaitanya');
+```
+
+Verify CDC:
+```sql
+SELECT * FROM employee_changes;
+```
+
+**Example Output:**
+```
+1|1|INSERT|chaitanya|2026-07-13 16:00:00
+```
+
+## Step 9: Docker Compose (Kafka Stack)
+Create `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  connect:
+    build: .
+    container_name: connect
+    depends_on:
+      - kafka
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: connect-group
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      PLUGIN_PATH: /kafka/connect
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    container_name: kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092
+
+volumes:
+  kafka_data:
+```
+
+## Step 10: Start Containers
+```bash
+docker compose down
+docker compose up -d
+```
+
+Verify:
+```bash
+docker ps
+```
+
+## Step 11: Create Kafka Topic
+```bash
+docker exec -it kafka kafka-topics --create --topic sqlite.employee_changes --bootstrap-server localhost:9092
+```
+
+Verify topics:
+```bash
+docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092
+```
+
+## Step 12: Install Kafka Library
+```bash
+pip install kafka-python
+```
+
+## Step 13: Create Producer (`sqlite_kafka_producer.py`)
+```python
+import sqlite3
+import json
+import time
+from kafka import KafkaProducer
+
+producer = KafkaProducer(
+    bootstrap_servers="localhost:9092",
+    value_serializer=lambda x: json.dumps(x).encode("utf-8")
+)
+
+conn = sqlite3.connect("employee.db")
+cursor = conn.cursor()
+
+print("SQLite CDC Producer Started...")
+
+while True:
+    cursor.execute("SELECT last_cdc_id FROM producer_offset")
+    last_id = cursor.fetchone()[0]
+
+    cursor.execute("""
+        SELECT cdc_id, employee_id, operation, changed_by, changed_at
+        FROM employee_changes
+        WHERE cdc_id > ?
+        ORDER BY cdc_id
+    """, (last_id,))
+
+    rows = cursor.fetchall()
+
+    for row in rows:
+        data = {
+            "cdc_id": row[0],
+            "employee_id": row[1],
+            "operation": row[2],
+            "changed_by": row[3],
+            "changed_at": row[4]
+        }
+
+        producer.send("sqlite.employee_changes", data)
+        print("Sent:", data)
+        last_id = row[0]
+
+    producer.flush()
+
+    cursor.execute("UPDATE producer_offset SET last_cdc_id=?", (last_id,))
+    conn.commit()
+
+    time.sleep(1)
+```
+
+## Step 14: Run Producer
+```bash
+python sqlite_kafka_producer.py
+```
+
+## Step 15: Start Consumer (for verification)
+```bash
+docker exec -it kafka kafka-console-consumer \
+--topic sqlite.employee_changes \
+--bootstrap-server localhost:9092 \
+--from-beginning
+```
+
+## Step 16: Simulate Application Changes
+```sql
+INSERT INTO employee VALUES(2, 'David', 60000, 'chaitanya');
+
+UPDATE employee SET salary = 70000, modified_by = 'admin' WHERE id = 2;
+
+DELETE FROM employee WHERE id = 2;
+```
+
+**Expected Kafka Output:**
+```json
+{
+  "cdc_id": 1,
+  "employee_id": 2,
+  "operation": "INSERT",
+  "changed_by": "chaitanya",
+  "changed_at": "2026-07-13 16:00:00"
+}
+{
+  "cdc_id": 2,
+  "employee_id": 2,
+  "operation": "UPDATE",
+  "changed_by": "admin",
+  "changed_at": "2026-07-13 16:05:00"
+}
+```
+
+---
 
 
