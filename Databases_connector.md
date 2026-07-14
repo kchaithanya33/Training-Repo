@@ -28,6 +28,8 @@ This guide walks you through setting up **Change Data Capture (CDC)** for Oracle
 
 ---
 
+# Oracle CDC using Debezium (with Audit Columns & Trigger)
+
 ## Step 1: Create SYS Connection in SQL Developer
 
 **Connection Details:**
@@ -42,9 +44,7 @@ This guide walks you through setting up **Change Data Capture (CDC)** for Oracle
 | Service Name   | XEPDB1         |
 | Role           | SYSDBA         |
 
-Click **Test** → **Connect**.
-
----
+Click **Test → Connect**.
 
 ## Step 2: Verify Current Container
 
@@ -52,7 +52,7 @@ Click **Test** → **Connect**.
 SHOW CON_NAME;
 ```
 
-If not `XEPDB1`:
+If it is not `XEPDB1`:
 
 ```sql
 ALTER SESSION SET CONTAINER = XEPDB1;
@@ -61,8 +61,6 @@ SHOW CON_NAME;
 
 **Expected:** `XEPDB1`
 
----
-
 ## Step 3: Remove Existing Users (Optional)
 
 ```sql
@@ -70,9 +68,7 @@ DROP USER CDC_USER CASCADE;
 DROP USER DEBEZIUM CASCADE;
 ```
 
-(Ignore `ORA-01918: User does not exist`)
-
----
+(Ignore `ORA-01918: user does not exist`)
 
 ## Step 4: Create CDC_USER
 
@@ -81,20 +77,18 @@ CREATE USER CDC_USER IDENTIFIED BY cdc123;
 
 GRANT CREATE SESSION TO CDC_USER;
 GRANT CREATE TABLE TO CDC_USER;
+GRANT CREATE TRIGGER TO CDC_USER;
+GRANT CREATE SEQUENCE TO CDC_USER;
 GRANT UNLIMITED TABLESPACE TO CDC_USER;
 ```
 
 **Verify:**
 
 ```sql
-SELECT privilege 
-FROM dba_sys_privs 
+SELECT privilege
+FROM dba_sys_privs
 WHERE grantee='CDC_USER';
 ```
-
-**Expected:** `CREATE SESSION`, `CREATE TABLE`, `UNLIMITED TABLESPACE`
-
----
 
 ## Step 5: Create DEBEZIUM User
 
@@ -112,8 +106,6 @@ GRANT SELECT_CATALOG_ROLE TO DEBEZIUM;
 GRANT CREATE TABLE TO DEBEZIUM;
 GRANT UNLIMITED TABLESPACE TO DEBEZIUM;
 ```
-
----
 
 ## Step 6: Grant V$ Permissions
 
@@ -134,9 +126,9 @@ GRANT SELECT ON V_$NLS_PARAMETERS TO DEBEZIUM;
 GRANT SELECT ON V_$TIMEZONE_NAMES TO DEBEZIUM;
 ```
 
----
-
 ## Step 7: Enable Archive Log Mode
+
+**Check:**
 
 ```sql
 ARCHIVE LOG LIST;
@@ -159,8 +151,6 @@ ARCHIVE LOG LIST;
 
 **Expected:** `Database log mode: Archive Mode`
 
----
-
 ## Step 8: Enable Supplemental Logging
 
 ```sql
@@ -171,26 +161,22 @@ ALTER DATABASE FORCE LOGGING;
 **Verify:**
 
 ```sql
-SELECT supplemental_log_data_min, force_logging 
+SELECT supplemental_log_data_min, force_logging
 FROM v$database;
 ```
 
-**Expected:** `YES` / `YES`
-
----
+**Expected:** `YES` for both.
 
 ## Step 9: Create CDC_USER Connection
 
-| Field     | Value     |
-|-----------|-----------|
-| Username  | CDC_USER  |
-| Password  | cdc123    |
-| Service   | XEPDB1    |
-| Role      | Default   |
+| Field      | Value     |
+|------------|-----------|
+| Username   | CDC_USER  |
+| Password   | cdc123    |
+| Service    | XEPDB1    |
+| Role       | Default   |
 
----
-
-## Step 10: Create Employee Table
+## Step 10: Create Employee Table (with Audit Columns)
 
 ```sql
 CREATE TABLE EMPLOYEE (
@@ -198,75 +184,66 @@ CREATE TABLE EMPLOYEE (
     EMP_NAME VARCHAR2(100),
     DEPARTMENT VARCHAR2(100),
     SALARY NUMBER,
+
     CREATED_BY VARCHAR2(100),
+    CREATED_AT TIMESTAMP,
+
     UPDATED_BY VARCHAR2(100),
-    DELETED_BY VARCHAR2(100)
+    UPDATED_AT TIMESTAMP,
+
+    DELETED_BY VARCHAR2(100),
+    DELETED_AT TIMESTAMP
 );
 ```
 
----
-
-## Step 11: Insert Sample Data
+## Step 11: Create Audit Trigger
 
 ```sql
-INSERT INTO EMPLOYEE VALUES (1, 'John', 'IT', 50000, 'Chaitanya', NULL, NULL);
-INSERT INTO EMPLOYEE VALUES (2, 'Sam', 'HR', 60000, 'Chaitanya', NULL, NULL);
+CREATE OR REPLACE TRIGGER TRG_EMPLOYEE_AUDIT
+BEFORE INSERT OR UPDATE ON EMPLOYEE
+FOR EACH ROW
+BEGIN
+    IF INSERTING THEN
+        :NEW.CREATED_BY := USER;
+        :NEW.CREATED_AT := SYSTIMESTAMP;
+    ELSIF UPDATING THEN
+        :NEW.UPDATED_BY := USER;
+        :NEW.UPDATED_AT := SYSTIMESTAMP;
+    END IF;
+END;
+/
+```
+
+## Step 12: Insert Sample Data
+
+```sql
+INSERT INTO EMPLOYEE (EMP_ID, EMP_NAME, DEPARTMENT, SALARY)
+VALUES (1, 'John', 'IT', 50000);
+
+INSERT INTO EMPLOYEE (EMP_ID, EMP_NAME, DEPARTMENT, SALARY)
+VALUES (2, 'Sam', 'HR', 60000);
+
 COMMIT;
 ```
 
----
+(The trigger will automatically populate `CREATED_BY` and `CREATED_AT`.)
 
-## Step 12: Verify Data
-
-```sql
-SELECT * FROM EMPLOYEE;
-```
-
----
-
-## Step 13: Update Example
-
-```sql
-UPDATE EMPLOYEE 
-SET SALARY = 65000, UPDATED_BY = 'Manager1' 
-WHERE EMP_ID = 2;
-COMMIT;
-```
-
----
-
-## Step 14: Delete Example
-
-```sql
-UPDATE EMPLOYEE SET DELETED_BY = 'AdminUser' WHERE EMP_ID = 1;
-COMMIT;
-
-DELETE FROM EMPLOYEE WHERE EMP_ID = 1;
-COMMIT;
-```
-
----
-
-## Step 15: Grant Access to Table
+## Step 13: Grant Table Access
 
 ```sql
 GRANT SELECT ON CDC_USER.EMPLOYEE TO DEBEZIUM;
 ```
 
----
+## Step 14: Create DEBEZIUM Connection
 
-## Step 16: Create DEBEZIUM Connection
+| Field      | Value      |
+|------------|------------|
+| Username   | DEBEZIUM   |
+| Password   | dbz123     |
+| Service    | XEPDB1     |
+| Role       | Default    |
 
-| Field     | Value      |
-|-----------|------------|
-| Username  | DEBEZIUM   |
-| Password  | dbz123     |
-| Service   | XEPDB1     |
-| Role      | Default    |
-
----
-
-## Step 17: Start Docker Services
+## Step 15: Start Docker
 
 ```bash
 docker compose down
@@ -274,11 +251,9 @@ docker compose up -d
 docker ps
 ```
 
-**Expected containers:** zookeeper, kafka, connect, kafdrop
+**Expected containers:** `zookeeper`, `kafka`, `connect`, `kafdrop`
 
----
-
-## Step 18: Verify Oracle Connector
+## Step 16: Verify Oracle Connector
 
 ```bash
 curl http://localhost:8083/connector-plugins
@@ -286,9 +261,9 @@ curl http://localhost:8083/connector-plugins
 
 Look for: `io.debezium.connector.oracle.OracleConnector`
 
----
+## Step 17: Create Oracle Debezium Connector
 
-## Step 19: Create Oracle Debezium Connector
+Save the following as `oracle-cdc.json`:
 
 ```json
 {
@@ -296,28 +271,37 @@ Look for: `io.debezium.connector.oracle.OracleConnector`
   "config": {
     "connector.class": "io.debezium.connector.oracle.OracleConnector",
     "tasks.max": "1",
+
     "database.hostname": "host.docker.internal",
     "database.port": "1521",
+
     "database.user": "DEBEZIUM",
     "database.password": "dbz123",
+
     "database.dbname": "XE",
     "database.pdb.name": "XEPDB1",
-    "database.url": "jdbc:oracle:thin:@//host.docker.internal:1521/xepdb1",
+
+    "database.url": "jdbc:oracle:thin:@//host.docker.internal:1521/XEPDB1",
+
     "topic.prefix": "oracle",
+
     "schema.include.list": "CDC_USER",
     "table.include.list": "CDC_USER.EMPLOYEE",
+
     "database.connection.adapter": "logminer",
+
     "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
     "schema.history.internal.kafka.topic": "schema-changes.oracle",
+
     "snapshot.locking.mode": "none",
-    "snapshot.mode": "schema_only_recovery",
-    "poll.interval.ms": "1000",
+    "snapshot.mode": "initial",
+
+    "poll.interval.ms": "500",
+
     "provide.transaction.metadata": "true"
   }
 }
 ```
-
----
 
 
 # PostgreSQL → Debezium → Kafka CDC Setup
