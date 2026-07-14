@@ -2,13 +2,12 @@
 
 | Database             | Management Tool              |
 | -------------------- | ---------------------------- |
-| Microsoft SQL Server | SQL Server Management Studio |
 | Oracle Database      | Oracle SQL Developer         |
 | PostgreSQL           | pgAdmin                      |
+| Microsoft SQL Server | SQL Server Management Studio |
 | MySQL                | MySQL Workbench              |
-| MariaDB              | HeidiSQL or DBeaver          |
-| IBM Db2              | IBM Data Studio              |
-| SAP HANA             | SAP HANA Studio              |
+| SQLite               | DB Browser for SQLite        |
+
 
 ## Oracle Database
 
@@ -333,19 +332,19 @@ Open:
 
 Find:
 
-```conf
+``` conf
 #wal_level = replica
 ```
 
 Change to:
 
-```conf
+``` conf
 wal_level = logical
 ```
 
 Add:
 
-```conf
+``` conf
 max_replication_slots = 10
 max_wal_senders = 10
 ```
@@ -354,153 +353,92 @@ Save the file.
 
 ### Why wal_level should be logical?
 
-PostgreSQL stores database changes in WAL.
+PostgreSQL stores database changes in WAL (Write Ahead Log). Debezium
+reads logical WAL entries to capture row-level INSERT, UPDATE and DELETE
+operations.
 
-**WAL** means: **Write Ahead Log**
+Example:
 
-**Example:**
-
-When we run:
-
-```sql
+``` sql
 UPDATE employee
 SET department='DevOps'
 WHERE id=3;
 ```
 
-PostgreSQL writes:
+WAL contains the old and new values. `wal_level=logical` is required so
+Debezium can decode these row-level changes.
 
-**WAL Entry:**
+`max_replication_slots` stores WAL until Debezium consumes it.
 
-- Old value: Security
-- New value: DevOps
+`max_wal_senders` allows replication connections.
 
-By default: `wal_level = replica` supports only **physical replication**.
+------------------------------------------------------------------------
 
-**Example:**
+## Step 2: Restart PostgreSQL
 
-Primary Database → Replica Database
-
-But Debezium needs **row-level changes**:
-
-**Before:** Security  
-**After:** DevOps
-
-Therefore, `wal_level = logical` is required.
-
-Logical replication converts WAL changes into a format Debezium understands.
-
-### Why max_replication_slots?
-
-Replication slots remember how much WAL Debezium consumed.
-
-**Example:**
-
-WAL: 1 2 3 4 5 6
-
-Debezium consumed till 4
-
-PostgreSQL will keep remaining WAL until Debezium reads it.
-
-### Why max_wal_senders?
-
-Allows PostgreSQL to create replication connections.
-
-**Example:**
-
-PostgreSQL  
-├── Debezium  
-└── Other Replicas
-
-## Step 2: Restart PostgreSQL service
-
-Open PowerShell as Administrator:
-
-```powershell
+``` powershell
 net stop postgresql-x64-17
-```
-
-Then:
-
-```powershell
 net start postgresql-x64-17
 ```
 
-## Step 3: Verify WAL settings
+------------------------------------------------------------------------
 
-In pgAdmin Query Tool:
+## Step 3: Verify
 
-Run:
-
-```sql
+``` sql
 SHOW wal_level;
-```
-
-**Output:** `logical`
-
-Check:
-
-```sql
 SHOW max_replication_slots;
 ```
 
-**Output:** `10`
+Expected:
 
-## Step 4: Create Debezium user
+    logical
+    10
 
-Run as postgres user:
+------------------------------------------------------------------------
 
-```sql
+## Step 4: Create Debezium User
+
+``` sql
 CREATE USER debezium
 WITH PASSWORD 'debezium'
 REPLICATION;
 ```
 
-### Why create Debezium user?
+------------------------------------------------------------------------
 
-Debezium needs a PostgreSQL account to connect.
+## Step 5: Grant Permissions
 
-The user answers: **WHO** can connect to PostgreSQL?
-
-**Example:**
-
-Debezium Connector → username/password → PostgreSQL
-
-The user `debezium` is used in connector configuration:
-
-`"database.user":"debezium"`
-
-## Step 5: Give permissions to Debezium user
-
-Run:
-
-```sql
+``` sql
 GRANT CONNECT ON DATABASE postgres TO debezium;
-
 GRANT CREATE ON DATABASE postgres TO debezium;
-
 GRANT USAGE ON SCHEMA public TO debezium;
-
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO debezium;
-
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
 GRANT SELECT ON TABLES TO debezium;
 ```
 
-- `GRANT CONNECT` - Allows database connection.
-- `GRANT CREATE` - Allows required database operations.
-- `GRANT USAGE` - Allows access to schema.
-- `GRANT SELECT` - Allows reading tables.
-- `ALTER DEFAULT PRIVILEGES` - Automatically gives permission for future tables.
+------------------------------------------------------------------------
 
-## Step 6: Create sample table
+## Step 6: Create Tables
 
-```sql
+``` sql
 CREATE TABLE employee
 (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100),
     department VARCHAR(100)
+);
+
+CREATE TABLE employee_audit
+(
+    audit_id SERIAL PRIMARY KEY,
+    emp_id INT,
+    operation VARCHAR(10),
+    db_user TEXT,
+    changed_at TIMESTAMP,
+    old_data JSONB,
+    new_data JSONB
 );
 
 INSERT INTO employee(name,department)
@@ -509,166 +447,141 @@ VALUES
 ('Mary','HR');
 ```
 
-## Step 7: Enable old value capture for UPDATE
+### Create Trigger Function
 
-```sql
+``` sql
+CREATE OR REPLACE FUNCTION audit_employee_changes()
+RETURNS TRIGGER AS $$
+BEGIN
+IF TG_OP='INSERT' THEN
+INSERT INTO employee_audit(emp_id,operation,db_user,changed_at,old_data,new_data)
+VALUES(NEW.id,'INSERT',CURRENT_USER,NOW(),NULL,to_jsonb(NEW));
+RETURN NEW;
+ELSIF TG_OP='UPDATE' THEN
+INSERT INTO employee_audit(emp_id,operation,db_user,changed_at,old_data,new_data)
+VALUES(NEW.id,'UPDATE',CURRENT_USER,NOW(),to_jsonb(OLD),to_jsonb(NEW));
+RETURN NEW;
+ELSIF TG_OP='DELETE' THEN
+INSERT INTO employee_audit(emp_id,operation,db_user,changed_at,old_data,new_data)
+VALUES(OLD.id,'DELETE',CURRENT_USER,NOW(),to_jsonb(OLD),NULL);
+RETURN OLD;
+END IF;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Create Trigger
+
+``` sql
+CREATE TRIGGER trg_employee_audit
+AFTER INSERT OR UPDATE OR DELETE
+ON employee
+FOR EACH ROW
+EXECUTE FUNCTION audit_employee_changes();
+```
+
+The trigger automatically records the PostgreSQL login (`CURRENT_USER`),
+timestamp, operation and row values into `employee_audit`.
+
+------------------------------------------------------------------------
+
+## Step 7: Enable Before Images
+
+``` sql
 ALTER TABLE employee REPLICA IDENTITY FULL;
 ```
 
-### Why REPLICA IDENTITY FULL?
+This allows Debezium to send complete `before` and `after` values.
 
-By default PostgreSQL sends only changed values.
+------------------------------------------------------------------------
 
-**Without:**
+## Step 8: Create Publication
 
-```json
-{
-  "before": null,
-  "after": {
-    "department": "DevOps"
-  }
-}
-```
-
-**With:**
-
-```json
-{
-  "before": {
-    "department": "Security"
-  },
-  "after": {
-    "department": "DevOps"
-  }
-}
-```
-
-This allows Debezium to send complete **before {}** and **after {}** records.
-
-## Step 8: Create Debezium publication
-
-Run as postgres:
-
-```sql
+``` sql
 CREATE PUBLICATION debezium_pub
-FOR TABLE public.employee;
+FOR TABLE public.employee,
+         public.employee_audit;
 ```
 
 Verify:
 
-```sql
+``` sql
 SELECT * FROM pg_publication_tables;
 ```
 
-**Output:**
+------------------------------------------------------------------------
 
-| pubname       | schemaname | tablename |
-|---------------|------------|-----------|
-| debezium_pub  | public     | employee  |
+## Step 9
 
-### Why create publication?
-
-Publication decides: **WHAT DATA SHOULD BE CAPTURED?**
-
-**Example database:**
-
-- employee
-- customer
-- orders
-
-**Publication:** `debezium_pub` → ONLY employee
-
-Debezium reads changes from this publication.
-
-### Difference between Debezium User and Publication
-
-| Component       | Purpose                  |
-|-----------------|--------------------------|
-| debezium user   | Who can connect          |
-| debezium_pub    | What tables can be captured |
-
-**Example:**
-
-- User `debezium` = Employee ID card
-- Publication `debezium_pub` = Permission list
-
-Both are required.
-
-## Step 9: Verify Kafka Connect is running
-
-```bash
+``` bash
 docker ps
 ```
 
-Running containers: `kafka`, `connect`, `zookeeper`
+------------------------------------------------------------------------
 
-## Step 10: Verify Debezium PostgreSQL plugin
+## Step 10
 
-```bash
+``` bash
 curl http://localhost:8083/connector-plugins
 ```
 
-Check for: `io.debezium.connector.postgresql.PostgresConnector`
+Verify `io.debezium.connector.postgresql.PostgresConnector`.
 
-## Step 11: Create Debezium connector JSON
+------------------------------------------------------------------------
 
-**File:** `postgres-cdc.json`
+## Step 11: Connector
 
-```json
+``` json
 {
-  "name": "postgres-cdc-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "tasks.max": "1",
-
-    "database.hostname": "host.docker.internal",
-    "database.port": "5433",
-    "database.user": "debezium",
-    "database.password": "debezium",
-    "database.dbname": "postgres",
-
-    "topic.prefix": "postgres",
-
-    "plugin.name": "pgoutput",
-
-    "slot.name": "debezium_slot",
-    "publication.name": "debezium_pub",
-    "publication.autocreate.mode": "disabled",
-
-    "table.include.list": "public.employee",
-
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-    "schema.history.internal.kafka.topic": "schema-changes.postgres"
-  }
+"name":"postgres-cdc-connector",
+"config":{
+"connector.class":"io.debezium.connector.postgresql.PostgresConnector",
+"tasks.max":"1",
+"database.hostname":"host.docker.internal",
+"database.port":"5433",
+"database.user":"debezium",
+"database.password":"debezium",
+"database.dbname":"postgres",
+"topic.prefix":"postgres",
+"plugin.name":"pgoutput",
+"slot.name":"debezium_slot",
+"publication.name":"debezium_pub",
+"publication.autocreate.mode":"disabled",
+"table.include.list":"public.employee,public.employee_audit",
+"schema.history.internal.kafka.bootstrap.servers":"kafka:9092",
+"schema.history.internal.kafka.topic":"schema-changes.postgres",
+"poll.interval.ms":"1000",
+"provide.transaction.metadata":"true"
+}
 }
 ```
 
-## Step 14: Create connector
+`poll.interval.ms` controls how frequently the connector polls
+PostgreSQL.
 
-```bash
-http://localhost:8083/connectors
-```
+`provide.transaction.metadata` includes transaction metadata with CDC
+events.
 
-**Response:** `201 Created`
+------------------------------------------------------------------------
 
-### Check connector status
+## Step 12: Create Connector
 
-```bash
+POST the JSON to:
+
+`http://localhost:8083/connectors`
+
+Verify:
+
+``` bash
 curl http://localhost:8083/connectors/postgres-cdc-connector/status
 ```
 
-**Successful output:**
+Expected state:
 
-```json
+``` json
 {
-  "connector": {
-    "state": "RUNNING"
-  },
-  "tasks": [
-    {
-      "state": "RUNNING"
-    }
-  ]
+ "connector":{"state":"RUNNING"},
+ "tasks":[{"state":"RUNNING"}]
 }
 ```
 ---
