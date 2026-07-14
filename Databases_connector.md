@@ -1111,5 +1111,272 @@ GO
 ```
 
 
+# MySQL → Debezium → Kafka CDC Setup
+
+## Step 1: Enable Binary Logging
+
+Open MySQL configuration.
+
+**Windows:**
+`C:\ProgramData\MySQL\MySQL Server 8.0\my.ini`
+
+Find the `[mysqld]` section.
+
+Add or modify:
+
+```ini
+[mysqld]
+
+server-id=1
+log_bin=mysql-bin
+binlog_format=ROW
+binlog_row_image=FULL
+expire_logs_days=10
+```
+
+Save the file.
+
+### Why?
+
+- **server-id**: Every MySQL server participating in replication must have a unique ID.
+- **log_bin**: Enables Binary Logs. Every database change (INSERT, UPDATE, DELETE) is written to the Binary Log. Debezium reads this Binary Log.
+- **binlog_format=ROW**: Required by Debezium. Stores row-level changes instead of just the SQL statement.
+- **binlog_row_image=FULL**: Stores the complete row before and after changes. Useful for UPDATE and DELETE.
+
+## Step 2: Restart MySQL
+
+**Windows**
+```bash
+net stop MySQL80
+net start MySQL80
+```
+
+## Step 3: Verify Configuration
+
+```sql
+SHOW VARIABLES LIKE 'log_bin';
+SHOW VARIABLES LIKE 'binlog_format';
+SHOW VARIABLES LIKE 'binlog_row_image';
+```
+
+**Expected:**
+- `log_bin = ON`
+- `binlog_format = ROW`
+- `binlog_row_image = FULL`
+
+## Step 4: Create Debezium User
+
+```sql
+CREATE USER 'debezium' IDENTIFIED BY 'dbz123';
+```
+
+## Step 5: Grant Permissions
+
+```sql
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT
+ON *.*
+TO 'debezium';
+
+FLUSH PRIVILEGES;
+```
+
+## Step 6: Create Database
+
+```sql
+CREATE DATABASE company;
+USE company;
+```
+
+## Step 7: Create Employee Table
+
+```sql
+CREATE TABLE employee (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100),
+    department VARCHAR(100),
+    salary DECIMAL(10,2)
+);
+```
+
+## Step 8: Create Audit Table
+
+```sql
+CREATE TABLE employee_audit (
+    audit_id INT AUTO_INCREMENT PRIMARY KEY,
+    emp_id INT,
+    operation VARCHAR(20),
+    db_user VARCHAR(100),
+    changed_at DATETIME,
+    old_data JSON,
+    new_data JSON
+);
+```
+
+## Step 9: Create INSERT Trigger
+
+```sql
+DELIMITER $$
+
+CREATE TRIGGER trg_employee_insert
+AFTER INSERT ON employee
+FOR EACH ROW
+BEGIN
+    INSERT INTO employee_audit (
+        emp_id, operation, db_user, changed_at, old_data, new_data
+    )
+    VALUES (
+        NEW.id,
+        'INSERT',
+        CURRENT_USER(),
+        NOW(),
+        NULL,
+        JSON_OBJECT(
+            'id', NEW.id,
+            'name', NEW.name,
+            'department', NEW.department,
+            'salary', NEW.salary
+        )
+    );
+END$$
+
+DELIMITER ;
+```
+
+## Step 10: Create UPDATE Trigger
+
+```sql
+DELIMITER $$
+
+CREATE TRIGGER trg_employee_update
+AFTER UPDATE ON employee
+FOR EACH ROW
+BEGIN
+    INSERT INTO employee_audit (
+        emp_id, operation, db_user, changed_at, old_data, new_data
+    )
+    VALUES (
+        NEW.id,
+        'UPDATE',
+        CURRENT_USER(),
+        NOW(),
+        JSON_OBJECT(
+            'id', OLD.id,
+            'name', OLD.name,
+            'department', OLD.department,
+            'salary', OLD.salary
+        ),
+        JSON_OBJECT(
+            'id', NEW.id,
+            'name', NEW.name,
+            'department', NEW.department,
+            'salary', NEW.salary
+        )
+    );
+END$$
+
+DELIMITER ;
+```
+
+## Step 11: Create DELETE Trigger
+
+```sql
+DELIMITER $$
+
+CREATE TRIGGER trg_employee_delete
+AFTER DELETE ON employee
+FOR EACH ROW
+BEGIN
+    INSERT INTO employee_audit (
+        emp_id, operation, db_user, changed_at, old_data, new_data
+    )
+    VALUES (
+        OLD.id,
+        'DELETE',
+        CURRENT_USER(),
+        NOW(),
+        JSON_OBJECT(
+            'id', OLD.id,
+            'name', OLD.name,
+            'department', OLD.department,
+            'salary', OLD.salary
+        ),
+        NULL
+    );
+END$$
+
+DELIMITER ;
+```
+
+## Step 12: Insert Sample Data
+
+```sql
+INSERT INTO employee (name, department, salary)
+VALUES 
+    ('John', 'IT', 50000),
+    ('Mary', 'HR', 60000);
+```
+
+## Step 13: Verify Audit Table
+
+```sql
+SELECT * FROM employee_audit;
+```
+
+## Step 14: Create Debezium Connector
+
+```json
+{
+  "name": "mysql-cdc-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "3306",
+    "database.user": "debezium",
+    "database.password": "dbz123",
+    "database.server.id": "184054",
+    "topic.prefix": "mysql",
+    "database.include.list": "company",
+    "table.include.list": "company.employee,company.employee_audit",
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.mysql",
+    "poll.interval.ms": "1000",
+    "provide.transaction.metadata": "true"
+  }
+}
+```
+
+Save this as `mysql-cdc.json`.
+
+## Step 15: Register the Connector
+
+```bash
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d @mysql-cdc.json
+```
+
+## Step 16: Verify Connector Status
+
+```bash
+curl http://localhost:8083/connectors/mysql-cdc-connector/status
+```
+
+**Expected:**
+```json
+{
+  "connector": {
+    "state": "RUNNING"
+  },
+  "tasks": [
+    {
+      "state": "RUNNING"
+    }
+  ]
+}
+```
+
+---
+
 
 
